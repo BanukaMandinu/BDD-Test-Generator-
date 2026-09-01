@@ -1,6 +1,8 @@
 # BDD Test Generator
 
-A local, shareable framework that generates BDD test cases (Gherkin) from a **link to a live page/UI** or a plain requirement/description — written the way a senior QA lead with 20+ years of experience would write them: natural, simple English that any stakeholder can read. It opens a local review site where you can edit, remove, or tick/untick each step, leave a review note on any test case and have it revised automatically, and track requirement coverage in a separate tab. You can then download the result as a `.feature` file.
+## About
+
+BDD Test Generator turns a **link to a live page/UI** or a plain requirement/description into ready-to-use Gherkin test cases — written the way a senior QA lead with 20+ years of experience would write them: natural, simple English any stakeholder can read. It opens a local review site where you can edit, remove, or tick/untick each step, leave a review note on any test case and have it revised automatically, track requirement coverage, and export as `.feature`, Excel, or a traceability matrix.
 
 Generation runs through your **local Claude Code CLI** (`claude`), not a separate API key — it uses whatever account (Pro/Max subscription or API key) you're already logged into Claude Code with on this machine.
 
