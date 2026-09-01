@@ -1,0 +1,271 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>BDD Test Generator</title>
+  <link rel="icon" href="favicon.png" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Manrope:wght@600;700;800&display=swap" />
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <header class="app-header">
+    <h1>BDD Test Generator</h1>
+    <select id="runSelect" aria-label="Previous runs">
+      <option value="">New run</option>
+    </select>
+  </header>
+
+  <main>
+    <section id="generatePanel" class="panel">
+      <div class="intro-box">
+        <p class="intro-lead">Paste a link to a site, or just describe what you want tested — then pick how:</p>
+        <ul class="intro-list">
+          <li><strong>Generate</strong> — writes tests straight from what you typed.</li>
+          <li><strong>Explore site</strong> — crawls the site automatically, then you pick which pages to cover.</li>
+          <li><strong>Record a flow</strong> — opens a real browser for you to click through by hand. Best for sites that sign in with Google/Microsoft/SSO, since automated sign-in there usually gets blocked.</li>
+        </ul>
+      </div>
+
+      <label class="field-label" for="inputText">Paste link</label>
+      <textarea id="inputText" rows="2" placeholder="Paste a link, or describe what to test…"></textarea>
+      <p id="urlGateHint" class="notice hidden">That's just a link — explore the site first.</p>
+
+      <div class="field-group" id="productInfoZone">
+        <label class="field-label" for="extraInstructions">Context <span class="muted-text">(optional)</span></label>
+        <textarea id="extraInstructions" rows="2" placeholder="Product notes, the flow to focus on…"></textarea>
+        <div class="inline-row">
+          <input type="file" id="productInfoFile" accept=".txt,.md,.pdf,.docx" hidden />
+          <button id="productInfoBtn" class="link-btn" title="Extracts text from a .txt, .md, .pdf, or .docx into the box above">+ Attach a spec file</button>
+          <span id="productInfoStatus" class="status"></span>
+        </div>
+        <ul id="productInfoWarnings" class="notice-list hidden"></ul>
+      </div>
+
+      <div class="field-group">
+        <div class="card-row">
+          <span class="card-title">Test types</span>
+          <span class="mini-actions">
+            <button id="typeAllBtn" class="link-btn">All</button>
+            <button id="typeDefaultsBtn" class="link-btn">Reset</button>
+          </span>
+        </div>
+        <div id="typeGrid" class="type-grid"></div>
+      </div>
+
+      <div class="actions-row">
+        <button id="generateBtn" class="primary" title="Write tests straight from what you typed above">Generate</button>
+        <button id="discoverBtn" class="secondary" title="Map the site's pages, then pick which to cover">Explore site</button>
+        <button id="recordBtn" class="secondary" title="Open a real browser, click through it yourself, and write tests from exactly what you did">Record a flow</button>
+        <span id="generateStatus" class="status"></span>
+      </div>
+
+      <div id="importZone" class="field-group">
+        <div class="inline-row">
+          <input type="file" id="importFile" accept=".feature,.json,.txt" hidden />
+          <button id="importBtn" class="link-btn">+ Import a .feature or .testrun.json</button>
+          <span id="importStatus" class="status"></span>
+        </div>
+        <ul id="importWarnings" class="notice-list hidden"></ul>
+      </div>
+
+      <!-- Page picker, shown after a discovery crawl. -->
+      <div id="pagePicker" class="card hidden">
+        <div class="card-row">
+          <span class="card-title">Pages found</span>
+          <span class="mini-actions">
+            <button id="pagesAllBtn" class="link-btn">All</button>
+            <button id="pagesNoneBtn" class="link-btn">None</button>
+            <button id="pagesFormsBtn" class="link-btn">Forms only</button>
+          </span>
+        </div>
+        <div id="pageList" class="page-list"></div>
+        <div class="actions-row">
+          <button id="generateFromPagesBtn" class="primary">Generate</button>
+          <span id="pagePickerStatus" class="status"></span>
+        </div>
+      </div>
+
+      <!-- Recording panel: shown once "Record a flow" opens a browser window. -->
+      <div id="recordPanel" class="card hidden">
+        <div class="card-row">
+          <span class="card-title">Recording</span>
+          <span id="recordStatus" class="muted-text">A browser window is open — click through your test, then Save test in its overlay.</span>
+        </div>
+        <div id="recordFlowList" class="page-list"></div>
+        <div class="actions-row">
+          <button id="generateFromRecordingsBtn" class="primary" disabled>Generate from recordings</button>
+          <button id="recordCancelBtn" class="link-btn">Discard session</button>
+          <span id="recordPanelStatus" class="status"></span>
+        </div>
+      </div>
+
+      <!-- Everything optional lives here, collapsed by default. -->
+      <div id="optionsPanel" class="options">
+        <div class="field-group">
+          <span class="card-title">Access &amp; behavior</span>
+          <label class="toggle-line" for="refineToggle">
+            <input type="checkbox" id="refineToggle" checked />
+            <span>Review draft before showing it <span class="muted-text">— cleans up wording, ~2× slower</span></span>
+          </label>
+
+          <label class="toggle-line" for="sessionToggle">
+            <input type="checkbox" id="sessionToggle" />
+            <span>Use a signed-in session <span class="muted-text" id="sessionHint">for pages behind login</span></span>
+          </label>
+          <button id="sessionSetupToggle" class="link-btn indent">Set one up →</button>
+
+          <div id="sessionBorrow" class="sub-card hidden">
+            <div class="card-row">
+              <span class="card-title">Borrow your Chrome session</span>
+              <button id="sessionClearBtn" class="link-btn hidden">forget</button>
+            </div>
+            <ol class="steps">
+              <li>
+                Open the site in Chrome, signed in. Press <kbd>F12</kbd> → Console.
+                <button id="sessionCopyBtn" class="secondary">Copy snippet</button>
+                <span id="sessionCopyStatus" class="status"></span>
+              </li>
+              <li>Paste it in the console, press <kbd>Enter</kbd> — it copies your session.</li>
+              <li>
+                Paste that here:
+                <textarea id="sessionPaste" rows="2" placeholder="Paste the copied session…"></textarea>
+                <div class="actions-row">
+                  <button id="sessionSaveBtn" class="primary">Save session</button>
+                  <span id="sessionSaveStatus" class="status"></span>
+                </div>
+              </li>
+            </ol>
+            <ul id="sessionWarnings" class="notice-list hidden"></ul>
+          </div>
+
+          <label class="toggle-line" for="interactiveToggle">
+            <input type="checkbox" id="interactiveToggle" />
+            <span>Let it interact with the page <span class="muted-text">— types &amp; submits forms; never on production</span></span>
+          </label>
+
+          <div id="credentialFields" class="sub-card hidden">
+            <div class="credential-row">
+              <input type="text" id="testUsername" placeholder="Test username" autocomplete="off" />
+              <input type="password" id="testPassword" placeholder="Test password" autocomplete="off" />
+            </div>
+            <p class="micro-note">Only used to sign in. Never saved or exported.</p>
+          </div>
+        </div>
+      </div>
+
+      <div id="activityLog" class="terminal hidden">
+        <div class="terminal-head">Activity</div>
+        <ul id="activityItems"></ul>
+      </div>
+    </section>
+
+    <section id="resultsPanel" class="panel hidden">
+      <div class="tabs">
+        <button class="tab-btn active" data-tab="testcases">Test Cases</button>
+        <button class="tab-btn" data-tab="coverage">Coverage</button>
+      </div>
+
+      <div id="tab-testcases" class="tab-content active">
+        <div class="feature-header">
+          <input id="featureTitle" class="feature-title-input" />
+          <div id="sourceUrlNote" class="muted-text source-url-note"></div>
+          <textarea id="featureDescription" rows="2" placeholder="Feature description (optional)"></textarea>
+        </div>
+
+        <div id="qualityPanel" class="card status-card hidden">
+          <div class="card-row">
+            <span id="qualityTitle" class="card-title"></span>
+            <button id="qualityToggle" class="link-btn">show</button>
+          </div>
+          <ul id="qualityIssues" class="notice-list hidden"></ul>
+        </div>
+
+        <div class="history-bar">
+          <label for="versionSelect">History</label>
+          <select id="versionSelect"><option value="">Current</option></select>
+          <span id="diffSummary" class="status"></span>
+        </div>
+        <div id="diffPanel" class="card hidden"></div>
+
+        <div id="refineNotes" class="card status-card good hidden">
+          <div class="card-title">What review changed</div>
+          <ul id="refineNotesList"></ul>
+        </div>
+
+        <div class="card">
+          <div class="card-title">Update every test case at once</div>
+          <p class="muted-text">One note, applied to <strong>ticked</strong> cases and steps only.</p>
+          <div class="review-row">
+            <textarea id="bulkReviewInput" class="review-input" placeholder="e.g. 'use the exact button labels from the site'"></textarea>
+            <button id="updateAllBtn" class="primary">Update all</button>
+          </div>
+          <span id="bulkReviewStatus" class="status"></span>
+          <div id="bulkActivityLog" class="terminal hidden">
+            <div class="terminal-head">Activity</div>
+            <ul id="bulkActivityItems"></ul>
+          </div>
+        </div>
+
+        <div id="scenarioList"></div>
+
+        <div class="actions-row">
+          <button id="addScenarioBtn" class="secondary">+ Add scenario</button>
+          <button id="saveRunBtn" class="primary">Save changes</button>
+
+          <span class="export-menu">
+            <button id="exportToggle" class="secondary">Download ▾</button>
+            <span id="exportOptions" class="export-options hidden">
+              <button id="exportBtn" class="export-option">
+                <strong>.feature</strong><span>Gherkin, for a repo or Cucumber runner</span>
+              </button>
+              <button id="exportXlsxBtn" class="export-option">
+                <strong>Excel</strong><span>Test-case sheet in the team layout</span>
+              </button>
+              <button id="exportTraceBtn" class="export-option">
+                <strong>Traceability matrix</strong><span>Requirement ↔ test case, for audit</span>
+              </button>
+              <button id="exportShareBtn" class="export-option">
+                <strong>Share file</strong><span>JSON — send to a teammate, keeps everything</span>
+              </button>
+            </span>
+          </span>
+
+          <span id="saveStatus" class="status"></span>
+        </div>
+      </div>
+
+      <div id="tab-coverage" class="tab-content">
+        <div class="coverage-summary">
+          <div class="progress-bar"><div id="coverageFill" class="progress-fill"></div></div>
+          <span id="coverageLabel">0 / 0 confirmed</span>
+        </div>
+        <div id="requirementList"></div>
+        <div class="actions-row">
+          <button id="saveCoverageBtn" class="primary">Save changes</button>
+          <button id="fillGapsBtn" class="secondary">Write missing test cases</button>
+          <span id="coverageSaveStatus" class="status"></span>
+        </div>
+        <div id="gapActivityLog" class="terminal hidden">
+          <div class="terminal-head">Activity</div>
+          <ul id="gapActivityItems"></ul>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <div id="confirmOverlay" class="modal-overlay hidden">
+    <div class="modal-box">
+      <p id="confirmMessage"></p>
+      <div class="modal-actions">
+        <button id="confirmCancelBtn" class="secondary">Cancel</button>
+        <button id="confirmOkBtn" class="primary">OK</button>
+      </div>
+    </div>
+  </div>
+
+  <script src="app.js"></script>
+</body>
+</html>

@@ -1,0 +1,40 @@
+{
+  "name": "bdd-test-generator-desktop",
+  "version": "1.0.0",
+  "description": "Desktop window wrapper for the BDD Test Generator — runs the existing Express server in-process and shows it in a native window instead of a browser tab.",
+  "main": "main.js",
+  "private": true,
+  "scripts": {
+    "start": "electron .",
+    "dist": "electron-builder"
+  },
+  "devDependencies": {
+    "electron": "^44.0.0",
+    "electron-builder": "^26.0.12"
+  },
+  "build": {
+    "appId": "com.bddtestgenerator.desktop",
+    "productName": "BDD Test Generator",
+    "directories": {
+      "output": "dist"
+    },
+    "files": [
+      "main.js"
+    ],
+    "extraResources": [
+      { "from": "../server", "to": "server" },
+      { "from": "../public", "to": "public" },
+      { "from": "../mcp", "to": "mcp" },
+      { "from": "../node_modules", "to": "node_modules" }
+    ],
+    "win": {
+      "target": ["nsis"]
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true
+    }
+  }
+}

@@ -1,0 +1,12 @@
+node_modules/
+.env
+data/
+Windows app/dist/
+Windows app/node_modules/
+.playwright-mcp/
+.browser-profile/
+mcp/playwright-profile.generated.json
+mcp/system-prompt.generated.txt
+.playwright/
+.claude/skills/playwright-cli/
+data/storage-state.json
