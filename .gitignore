@@ -7,6 +7,7 @@ Windows app/node_modules/
 .browser-profile/
 mcp/playwright-profile.generated.json
 mcp/system-prompt.generated.txt
+TestGenerator-Handbook.pdf
 .playwright/
 .claude/skills/playwright-cli/
 data/storage-state.json
