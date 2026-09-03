@@ -9,13 +9,27 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Manrope:wght@600;700;800&display=swap" />
   <link rel="stylesheet" href="styles.css" />
+  <script>
+    (() => {
+      try {
+        const saved = localStorage.getItem('theme');
+        const theme = saved === 'dark' || saved === 'light'
+          ? saved
+          : (window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light');
+        document.documentElement.setAttribute('data-theme', theme);
+      } catch (e) {}
+    })();
+  </script>
 </head>
 <body>
   <header class="app-header">
     <h1>BDD Test Generator</h1>
-    <select id="runSelect" aria-label="Previous runs">
-      <option value="">New run</option>
-    </select>
+    <div class="header-actions">
+      <button id="themeToggle" class="icon-btn" type="button" aria-label="Toggle dark mode" title="Toggle dark mode">🌙</button>
+      <select id="runSelect" aria-label="Previous runs">
+        <option value="">New run</option>
+      </select>
+    </div>
   </header>
 
   <main>

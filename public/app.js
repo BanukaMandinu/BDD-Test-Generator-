@@ -1,6 +1,18 @@
 (() => {
   const el = (id) => document.getElementById(id);
 
+  const themeToggle = el('themeToggle');
+  const applyTheme = (theme) => {
+    document.documentElement.setAttribute('data-theme', theme);
+    themeToggle.textContent = theme === 'dark' ? '☀️' : '🌙';
+  };
+  applyTheme(document.documentElement.getAttribute('data-theme') || 'light');
+  themeToggle.addEventListener('click', () => {
+    const next = document.documentElement.getAttribute('data-theme') === 'dark' ? 'light' : 'dark';
+    try { localStorage.setItem('theme', next); } catch (e) {}
+    applyTheme(next);
+  });
+
   const resultsPanel = el('resultsPanel');
   const inputText = el('inputText');
   const generateBtn = el('generateBtn');
