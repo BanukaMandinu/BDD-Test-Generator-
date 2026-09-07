@@ -1294,14 +1294,8 @@
   // ---------- Scenarios ----------
   const KEYWORDS = ['Given', 'When', 'Then', 'And', 'But'];
 
-  // Scenario cards show just the path, with the full URL on hover.
-  function shortPath(url) {
-    try {
-      const u = new URL(url);
-      return u.pathname === '/' ? '/' : u.pathname.replace(/\/$/, '');
-    } catch {
-      return url;
-    }
+  function typeLabel(id) {
+    return testTypes.find((t) => t.id === id)?.label || id;
   }
 
   function keywordSelectHtml(current) {
@@ -1484,7 +1478,7 @@
         <div class="scenario-top">
           <input type="checkbox" class="scenario-included" ${scenario.included !== false ? 'checked' : ''} title="Ticked: included in the export, and 'Update all' will apply reviews to it. Unticked: left out of the export and skipped by 'Update all'." />
           <input type="text" class="scenario-title-input" value="${escapeHtml(scenario.title)}" placeholder="Name this scenario" />
-          ${scenario.page ? `<span class="page-badge" title="${escapeHtml(scenario.page)}">${escapeHtml(shortPath(scenario.page))}</span>` : ''}
+          ${scenario.testType ? `<span class="type-badge" data-type-id="${escapeHtml(scenario.testType)}">${escapeHtml(typeLabel(scenario.testType))}</span>` : ''}
           <button class="danger-outline delete-scenario" title="Delete scenario">Delete</button>
         </div>
         <div class="scenario-steps">${stepsHtml}</div>

@@ -43,6 +43,60 @@
         </ul>
       </div>
 
+      <!-- Everything optional lives here, collapsed by default. -->
+      <div id="optionsPanel" class="options">
+        <div class="field-group">
+          <span class="card-title">Access &amp; behavior</span>
+          <label class="toggle-line" for="refineToggle">
+            <input type="checkbox" id="refineToggle" checked />
+            <span>Review draft before showing it <span class="muted-text">— cleans up wording, ~2× slower</span></span>
+          </label>
+
+          <label class="toggle-line" for="sessionToggle">
+            <input type="checkbox" id="sessionToggle" />
+            <span>Use a signed-in session <span class="muted-text" id="sessionHint">for pages behind login</span></span>
+          </label>
+          <button id="sessionSetupToggle" class="link-btn indent">Set one up →</button>
+
+          <div id="sessionBorrow" class="sub-card hidden">
+            <div class="card-row">
+              <span class="card-title">Borrow your Chrome session</span>
+              <button id="sessionClearBtn" class="link-btn hidden">forget</button>
+            </div>
+            <ol class="steps">
+              <li>
+                Open the site in Chrome, signed in. Press <kbd>F12</kbd> → Console.
+                <button id="sessionCopyBtn" class="secondary">Copy snippet</button>
+                <span id="sessionCopyStatus" class="status"></span>
+              </li>
+              <li>Paste it in the console, press <kbd>Enter</kbd> — it copies your session.</li>
+              <li>
+                Paste that here:
+                <textarea id="sessionPaste" rows="2" placeholder="Paste the copied session…"></textarea>
+                <div class="actions-row">
+                  <button id="sessionSaveBtn" class="primary">Save session</button>
+                  <span id="sessionSaveStatus" class="status"></span>
+                </div>
+              </li>
+            </ol>
+            <ul id="sessionWarnings" class="notice-list hidden"></ul>
+          </div>
+
+          <label class="toggle-line" for="interactiveToggle">
+            <input type="checkbox" id="interactiveToggle" />
+            <span>Let it interact with the page <span class="muted-text">— types &amp; submits forms; never on production</span></span>
+          </label>
+
+          <div id="credentialFields" class="sub-card hidden">
+            <div class="credential-row">
+              <input type="text" id="testUsername" placeholder="Test username" autocomplete="off" />
+              <input type="password" id="testPassword" placeholder="Test password" autocomplete="off" />
+            </div>
+            <p class="micro-note">Only used to sign in. Never saved or exported.</p>
+          </div>
+        </div>
+      </div>
+
       <label class="field-label" for="inputText">Paste link</label>
       <textarea id="inputText" rows="2" placeholder="Paste a link, or describe what to test…"></textarea>
       <p id="urlGateHint" class="notice hidden">That's just a link — explore the site first.</p>
@@ -113,60 +167,6 @@
           <button id="generateFromRecordingsBtn" class="primary" disabled>Generate from recordings</button>
           <button id="recordCancelBtn" class="link-btn">Discard session</button>
           <span id="recordPanelStatus" class="status"></span>
-        </div>
-      </div>
-
-      <!-- Everything optional lives here, collapsed by default. -->
-      <div id="optionsPanel" class="options">
-        <div class="field-group">
-          <span class="card-title">Access &amp; behavior</span>
-          <label class="toggle-line" for="refineToggle">
-            <input type="checkbox" id="refineToggle" checked />
-            <span>Review draft before showing it <span class="muted-text">— cleans up wording, ~2× slower</span></span>
-          </label>
-
-          <label class="toggle-line" for="sessionToggle">
-            <input type="checkbox" id="sessionToggle" />
-            <span>Use a signed-in session <span class="muted-text" id="sessionHint">for pages behind login</span></span>
-          </label>
-          <button id="sessionSetupToggle" class="link-btn indent">Set one up →</button>
-
-          <div id="sessionBorrow" class="sub-card hidden">
-            <div class="card-row">
-              <span class="card-title">Borrow your Chrome session</span>
-              <button id="sessionClearBtn" class="link-btn hidden">forget</button>
-            </div>
-            <ol class="steps">
-              <li>
-                Open the site in Chrome, signed in. Press <kbd>F12</kbd> → Console.
-                <button id="sessionCopyBtn" class="secondary">Copy snippet</button>
-                <span id="sessionCopyStatus" class="status"></span>
-              </li>
-              <li>Paste it in the console, press <kbd>Enter</kbd> — it copies your session.</li>
-              <li>
-                Paste that here:
-                <textarea id="sessionPaste" rows="2" placeholder="Paste the copied session…"></textarea>
-                <div class="actions-row">
-                  <button id="sessionSaveBtn" class="primary">Save session</button>
-                  <span id="sessionSaveStatus" class="status"></span>
-                </div>
-              </li>
-            </ol>
-            <ul id="sessionWarnings" class="notice-list hidden"></ul>
-          </div>
-
-          <label class="toggle-line" for="interactiveToggle">
-            <input type="checkbox" id="interactiveToggle" />
-            <span>Let it interact with the page <span class="muted-text">— types &amp; submits forms; never on production</span></span>
-          </label>
-
-          <div id="credentialFields" class="sub-card hidden">
-            <div class="credential-row">
-              <input type="text" id="testUsername" placeholder="Test username" autocomplete="off" />
-              <input type="password" id="testPassword" placeholder="Test password" autocomplete="off" />
-            </div>
-            <p class="micro-note">Only used to sign in. Never saved or exported.</p>
-          </div>
         </div>
       </div>
 

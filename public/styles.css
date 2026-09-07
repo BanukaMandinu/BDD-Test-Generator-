@@ -179,12 +179,6 @@ h2 { margin: 0 0 10px; font-size: 15px; }
 .hint { color: var(--muted); font-size: 12px; }
 .source-url-note { word-break: break-all; margin: -2px 0 8px; }
 
-.page-badge {
-  font-size: 10px; padding: 2px 7px; border-radius: 9px; white-space: nowrap;
-  background: var(--primary-tint); color: var(--muted);
-  font-family: ui-monospace, Consolas, monospace;
-}
-
 .notice {
   margin: 8px 0 0; padding: 8px 11px; border-radius: var(--radius-sm);
   background: var(--warn-bg); border: 1px solid var(--warn-border); color: var(--warn-text); font-size: 12px;
