@@ -99,7 +99,9 @@ function addTestCasesSheet(workbook, run) {
       .join('; ');
 
     sheet.addRow({
-      testId: `${prefix}-${String(i + 1).padStart(3, '0')}`,
+      // An imported sheet keeps its own IDs (TC-02 stays TC-02) so edits land back
+      // against the same rows in the tracker.
+      testId: scenario.testId || `${prefix}-${String(i + 1).padStart(3, '0')}`,
       summary: isOutline(scenario) ? `${scenario.title} (outline — ${exampleRowCount(scenario)} cases)` : scenario.title,
       description: requirementText || run.featureDescription || run.featureTitle,
       steps,

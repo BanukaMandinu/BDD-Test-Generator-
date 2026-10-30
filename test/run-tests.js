@@ -906,10 +906,111 @@ group('detectUrl — bare domains, not just full URLs (server/lib/claudeCli.js)'
 });
 
 // ---------------------------------------------------------------------------
-console.log(`\n${'='.repeat(52)}`);
-console.log(`${passed} passed, ${failed} failed`);
-if (failed) {
-  console.log('\nFailures:');
-  failures.forEach((f) => console.log(`  ${f.name}: ${f.message}`));
+// Spreadsheet import is async (the workbook is parsed off a buffer), so its
+// checks run after the synchronous groups and are awaited before the summary.
+async function asyncTest(name, fn) {
+  try {
+    await fn();
+    passed++;
+    console.log(`  ✓ ${name}`);
+  } catch (err) {
+    failed++;
+    failures.push({ name, message: err.message });
+    console.log(`  ✗ ${name}`);
+    console.log(`      ${err.message}`);
+  }
 }
-process.exit(failed ? 1 : 0);
+
+async function excelImportTests() {
+  console.log('\nexcelImport — importing an Excel sheet');
+  const ExcelJS = require('exceljs');
+  const { listSheets, parseSheet } = require('../server/lib/excelImport');
+
+  // Mirrors the team's tracker: a header row, then one row per case, with
+  // Gherkin (and an Examples table) inside the Test Steps cell.
+  const wb = new ExcelJS.Workbook();
+  const menu = wb.addWorksheet('Menu Items');
+  menu.addRow(['Test ID', 'Summary', 'Description', 'Test Steps', 'Priority', 'Test Type']);
+  menu.addRow(['TC-02', 'Verify Previous button is disabled on the first slide', 'Instructor checks the Previous button',
+    'Given the <user> is on the first slide\nWhen the <user> looks at the Previous button\nThen the button is disabled\nAnd clicking it does nothing\n\nExamples:\n| user |\n| Instructor |',
+    'High', 'Cucumber']);
+  menu.addRow(['TC-03', 'Verify Previous goes back', 'Instructor clicks Previous', 'Given the user is on slide 3\nWhen the user clicks Previous\nThen slide 2 is shown', 'Medium', 'Cucumber']);
+  menu.addRow([]);
+  menu.addRow(['TC-04', 'Row with no steps', 'n/a', 'just some prose', 'Low', 'Cucumber']);
+  const notes = wb.addWorksheet('Notes');
+  notes.addRow(['Field', 'Value']);
+  notes.addRow(['Owner', 'QA']);
+  const hidden = wb.addWorksheet('Scratch');
+  hidden.state = 'hidden';
+  const noHeader = wb.addWorksheet('No Header');
+  noHeader.addRow(['TC-01', 'Open the menu', 'Menu opens', 'Given the user is on the home page\nWhen the user opens the menu\nThen the menu items are listed']);
+  const base64 = Buffer.from(await wb.xlsx.writeBuffer()).toString('base64');
+
+  await asyncTest('lists visible sheets only, and flags which ones hold test steps', async () => {
+    const sheets = await listSheets(base64);
+    assert.deepStrictEqual(sheets.map((s) => s.name), ['Menu Items', 'Notes', 'No Header']);
+    assert.strictEqual(sheets.find((s) => s.name === 'Menu Items').looksLikeTestCases, true);
+    assert.strictEqual(sheets.find((s) => s.name === 'Notes').looksLikeTestCases, false);
+  });
+
+  await asyncTest('turns each row into a scenario with its Test ID, steps and outline Examples', async () => {
+    const r = await parseSheet(base64, 'Menu Items');
+    assert.strictEqual(r.featureTitle, 'Menu Items');
+    assert.strictEqual(r.scenarios.length, 2);
+    const [first, second] = r.scenarios;
+    assert.strictEqual(first.testId, 'TC-02');
+    assert.strictEqual(first.title, 'Verify Previous button is disabled on the first slide');
+    assert.deepStrictEqual(first.steps.map((s) => s.keyword), ['Given', 'When', 'Then', 'And']);
+    // Whether it is an outline is decided by the import route (placeholders + rows).
+    assert.deepStrictEqual(first.examples, [['user'], ['Instructor']]);
+    assert.strictEqual(second.examples, null);
+  });
+
+  await asyncTest('reports rows it could not read instead of dropping them silently', async () => {
+    const r = await parseSheet(base64, 'Menu Items');
+    assert.ok(r.warnings.some((w) => /TC-04/.test(w) && /skipped/.test(w)));
+  });
+
+  await asyncTest('reads a sheet with no header row as ID / Summary / Description / Steps', async () => {
+    const r = await parseSheet(base64, 'No Header');
+    assert.strictEqual(r.scenarios.length, 1);
+    assert.strictEqual(r.scenarios[0].testId, 'TC-01');
+    assert.ok(r.warnings.some((w) => /No header row/.test(w)));
+  });
+
+  await asyncTest('rejects an unknown sheet, a non-workbook and an empty file', async () => {
+    await assert.rejects(() => parseSheet(base64, 'Nope'), /wasn't found/);
+    await assert.rejects(() => listSheets(Buffer.from('plain text').toString('base64')), /not a \.xlsx/);
+    await assert.rejects(() => listSheets(''), /empty/);
+  });
+
+  await asyncTest('does not evaluate a formula in a cell — only its text is read', async () => {
+    const evil = new ExcelJS.Workbook();
+    const s = evil.addWorksheet('Evil');
+    s.addRow(['Test ID', 'Summary', 'Test Steps']);
+    s.addRow(['X-1', { formula: 'HYPERLINK("http://example.com","Open")', result: 'Open' }, 'Given a thing\nWhen it happens\nThen it works']);
+    const b64 = Buffer.from(await evil.xlsx.writeBuffer()).toString('base64');
+    const r = await parseSheet(b64, 'Evil');
+    assert.strictEqual(r.scenarios[0].title, 'Open');
+  });
+
+  await asyncTest('Excel export keeps an imported Test ID instead of renumbering', async () => {
+    const { buildWorkbook } = require('../server/lib/excel');
+    const r = await parseSheet(base64, 'Menu Items');
+    const run = { featureTitle: 'Menu Items', featureDescription: '', createdAt: new Date().toISOString(), requirements: [], scenarios: r.scenarios };
+    const out = new ExcelJS.Workbook();
+    await out.xlsx.load(await buildWorkbook(run));
+    const ids = out.getWorksheet('Test Cases').getColumn(1).values.slice(2);
+    assert.deepStrictEqual(ids, ['TC-02', 'TC-03']);
+  });
+}
+
+excelImportTests().then(() => {
+  console.log(`\n${'='.repeat(52)}`);
+  console.log(`${passed} passed, ${failed} failed`);
+  if (failed) {
+    console.log('\nFailures:');
+    failures.forEach((f) => console.log(`  ${f.name}: ${f.message}`));
+  }
+  process.exit(failed ? 1 : 0);
+});

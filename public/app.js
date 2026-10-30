@@ -188,6 +188,80 @@
 
   const MAX_IMPORT_BYTES = 2 * 1024 * 1024;
 
+  const sheetPicker = el('sheetPicker');
+  const sheetPickerTitle = el('sheetPickerTitle');
+  const sheetList = el('sheetList');
+  const sheetImportBtn = el('sheetImportBtn');
+  const sheetPickerCancel = el('sheetPickerCancel');
+
+  // A workbook is read as base64 (it's binary) and kept here while the user picks
+  // a sheet, so choosing doesn't mean uploading it a second time.
+  let pendingWorkbook = null; // { content, filename }
+
+  const isWorkbook = (file) => /\.xlsx$/i.test(file.name);
+
+  function fileToBase64(file) {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onerror = () => reject(new Error('That file could not be read.'));
+      reader.onload = () => resolve(String(reader.result).split(',')[1] || '');
+      reader.readAsDataURL(file);
+    });
+  }
+
+  function hideSheetPicker() {
+    pendingWorkbook = null;
+    sheetPicker.classList.add('hidden');
+    sheetList.innerHTML = '';
+  }
+
+  function showSheetPicker(filename, sheets) {
+    sheetPickerTitle.textContent = `${filename} has ${sheets.length} sheets — choose the one to import`;
+    // Pre-select the first sheet that actually holds Given/When/Then steps.
+    const preferred = Math.max(0, sheets.findIndex((s) => s.looksLikeTestCases));
+    sheetList.innerHTML = sheets.map((s, i) => `
+      <label class="sheet-option ${s.looksLikeTestCases ? '' : 'dim'}">
+        <input type="radio" name="sheetChoice" value="${escapeHtml(s.name)}" ${i === preferred ? 'checked' : ''} />
+        <span class="sheet-name">${escapeHtml(s.name)}</span>
+        <span class="sheet-meta">${s.looksLikeTestCases
+          ? `${s.testCases} test case${s.testCases === 1 ? '' : 's'}`
+          : 'no test steps found'}</span>
+      </label>`).join('');
+    sheetPicker.classList.remove('hidden');
+  }
+
+  async function importWorkbook(file) {
+    const content = await fileToBase64(file);
+    const { sheets } = await api('/import/sheets', {
+      method: 'POST',
+      body: JSON.stringify({ content, filename: file.name }),
+    });
+
+    // One sheet: nothing to choose, import it straight away.
+    if (sheets.length === 1) return submitImport({ content, filename: file.name, sheet: sheets[0].name });
+
+    pendingWorkbook = { content, filename: file.name };
+    setStatus(importStatus, '');
+    showSheetPicker(file.name, sheets);
+  }
+
+  async function submitImport(payload) {
+    const { run, warnings } = await api('/import', { method: 'POST', body: JSON.stringify(payload) });
+
+    hideSheetPicker();
+    currentRun = run;
+    setStatus(importStatus, `Imported ${run.scenarios.length} test case${run.scenarios.length === 1 ? '' : 's'}.`, 'ok');
+
+    if (warnings?.length) {
+      importWarnings.innerHTML = warnings.map((w) => `<li>${escapeHtml(w)}</li>`).join('');
+      importWarnings.classList.remove('hidden');
+    }
+
+    await loadRunList(run.id);
+    showRun();
+    resultsPanel.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  }
+
   async function importFileContents(file) {
     if (!file) return;
     if (file.size > MAX_IMPORT_BYTES) {
@@ -197,32 +271,38 @@
 
     importWarnings.classList.add('hidden');
     importWarnings.innerHTML = '';
+    hideSheetPicker();
     setStatus(importStatus, `Reading ${file.name}…`);
 
     try {
-      const content = await file.text();
-      const { run, warnings } = await api('/import', {
-        method: 'POST',
-        body: JSON.stringify({ content, filename: file.name }),
-      });
-
-      currentRun = run;
-      setStatus(importStatus, `Imported ${run.scenarios.length} test case${run.scenarios.length === 1 ? '' : 's'}.`, 'ok');
-
-      if (warnings?.length) {
-        importWarnings.innerHTML = warnings.map((w) => `<li>${escapeHtml(w)}</li>`).join('');
-        importWarnings.classList.remove('hidden');
+      if (isWorkbook(file)) {
+        await importWorkbook(file);
+      } else {
+        const content = await file.text();
+        await submitImport({ content, filename: file.name });
       }
-
-      await loadRunList(run.id);
-      showRun();
-      resultsPanel.scrollIntoView({ behavior: 'smooth', block: 'start' });
     } catch (err) {
       setStatus(importStatus, err.message, 'error');
     } finally {
       importFile.value = ''; // allow re-picking the same file
     }
   }
+
+  sheetImportBtn.addEventListener('click', async () => {
+    const chosen = sheetList.querySelector('input[name="sheetChoice"]:checked');
+    if (!pendingWorkbook || !chosen) return;
+    sheetImportBtn.disabled = true;
+    importWarnings.classList.add('hidden');
+    importWarnings.innerHTML = '';
+    try {
+      await submitImport({ ...pendingWorkbook, sheet: chosen.value });
+    } catch (err) {
+      setStatus(importStatus, err.message, 'error');
+    } finally {
+      sheetImportBtn.disabled = false;
+    }
+  });
+  sheetPickerCancel.addEventListener('click', hideSheetPicker);
 
   importBtn.addEventListener('click', () => importFile.click());
   importFile.addEventListener('change', () => importFileContents(importFile.files[0]));
@@ -763,6 +843,7 @@
         </label>
       `;
     }).join('');
+    updateTypeCount();
   }
 
   function selectedTypeIds() {
@@ -771,9 +852,16 @@
       .map((item) => item.dataset.typeId);
   }
 
+  // The fold is collapsed by default, so its heading says what's chosen.
+  function updateTypeCount() {
+    const n = selectedTypeIds().length;
+    el('typeCount').textContent = n ? `${n} selected` : 'none selected — pick at least one';
+  }
+
   typeGrid.addEventListener('change', (e) => {
     const item = e.target.closest('.type-item');
     if (item) item.classList.toggle('on', e.target.checked);
+    updateTypeCount();
   });
 
   function setTypes(ids) {
@@ -1053,6 +1141,22 @@
   });
 
   // ---------- Run list ----------
+  // Once a run is open the big start panel is just in the way — it folds down to
+  // a one-line bar, and "New test run" (or choosing "— new —") opens it again.
+  const startBar = el('startBar');
+  const generatePanel = el('generatePanel');
+  const newRunBtn = el('newRunBtn');
+  let collapsedForRunId = null;
+
+  function setStartCollapsed(collapsed) {
+    generatePanel.classList.toggle('compact', collapsed);
+  }
+
+  newRunBtn.addEventListener('click', () => {
+    setStartCollapsed(false);
+    inputText.focus();
+  });
+
   async function loadRunList(selectId) {
     const runs = await api('/runs');
     runSelect.innerHTML = '<option value="">— new —</option>' +
@@ -1063,6 +1167,7 @@
   runSelect.addEventListener('change', async () => {
     if (!runSelect.value) {
       resultsPanel.classList.add('hidden');
+      setStartCollapsed(false);
       inputText.value = '';
       currentRun = null;
       return;
@@ -1274,6 +1379,10 @@
 
   function showRun() {
     resultsPanel.classList.remove('hidden');
+    if (currentRun && currentRun.id !== collapsedForRunId) {
+      collapsedForRunId = currentRun.id;
+      setStartCollapsed(true);
+    }
     renderFeatureHeader();
     renderQuality();
     renderRefineNotes();
@@ -1478,6 +1587,7 @@
         <div class="scenario-top">
           <input type="checkbox" class="scenario-included" ${scenario.included !== false ? 'checked' : ''} title="Ticked: included in the export, and 'Update all' will apply reviews to it. Unticked: left out of the export and skipped by 'Update all'." />
           <input type="text" class="scenario-title-input" value="${escapeHtml(scenario.title)}" placeholder="Name this scenario" />
+          ${scenario.testId ? `<span class="test-id-badge" title="Test ID from the imported sheet">${escapeHtml(scenario.testId)}</span>` : ''}
           ${scenario.testType ? `<span class="type-badge" data-type-id="${escapeHtml(scenario.testType)}">${escapeHtml(typeLabel(scenario.testType))}</span>` : ''}
           <button class="danger-outline delete-scenario" title="Delete scenario">Delete</button>
         </div>

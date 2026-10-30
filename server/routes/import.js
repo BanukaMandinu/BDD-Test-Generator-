@@ -1,6 +1,7 @@
 const express = require('express');
 const crypto = require('crypto');
 const { parseFeature } = require('../lib/featureParser');
+const excelImport = require('../lib/excelImport');
 const { saveRun } = require('../lib/store');
 const { resolveTypes, TEST_TYPES } = require('../lib/testTypes');
 const { normalizeExamples, placeholdersInStep } = require('../lib/placeholders');
@@ -57,8 +58,11 @@ function sanitizeScenario(raw, requirementIdByIndex, validTypeIds) {
     .map((v) => (typeof v === 'number' ? requirementIdByIndex[v] : requirementIdByIndex.byOldId?.[v]))
     .filter(Boolean);
 
+  const testId = typeof raw?.testId === 'string' && raw.testId.trim() ? raw.testId.trim().slice(0, 40) : null;
+
   return {
     id: crypto.randomUUID(),
+    ...(testId ? { testId } : {}),
     title: String(raw?.title ?? 'Untitled scenario').slice(0, 500),
     testType: validTypeIds.has(raw?.testType) ? raw.testType : null,
     included: raw?.included !== false,
@@ -108,8 +112,9 @@ function buildFromJson(parsed) {
   };
 }
 
-function buildFromFeature(text) {
-  const parsed = parseFeature(text);
+// Shared by .feature and spreadsheet imports: both arrive as parsed scenarios
+// with no requirements list.
+function buildFromParsed(parsed, notice) {
   // Keep whatever @tags mapped to a known type, without forcing the defaults.
   const validTypeIds = new Set(TEST_TYPES.map((t) => t.id));
 
@@ -131,32 +136,71 @@ function buildFromFeature(text) {
     // Only claim the types the file actually carries; otherwise the coverage
     // check would report every default type as "missing".
     selectedTypes: typesPresent,
-    warnings: [
-      ...parsed.warnings,
-      'A .feature file carries no requirements list, so the Coverage tab starts empty. Send the JSON share file instead to keep coverage.',
-    ],
+    warnings: [...parsed.warnings, notice],
   };
 }
+
+function buildFromFeature(text) {
+  return buildFromParsed(
+    parseFeature(text),
+    'A .feature file carries no requirements list, so the Coverage tab starts empty. Send the JSON share file instead to keep coverage.'
+  );
+}
+
+function buildFromSheet(parsed) {
+  return buildFromParsed(
+    parsed,
+    'A spreadsheet carries no requirements list, so the Coverage tab starts empty.'
+  );
+}
+
+const isXlsx = (filename) => /\.xlsx$/i.test(filename || '');
 
 function looksLikeJson(content, filename) {
   if (/\.json$/i.test(filename || '')) return true;
   return content.trim().startsWith('{');
 }
 
-router.post('/import', (req, res, next) => {
+// Step 1 of a spreadsheet import: which sheets does the workbook have? A
+// workbook usually holds one sheet per feature, so the user picks one.
+router.post('/import/sheets', async (req, res) => {
+  const content = typeof req.body?.content === 'string' ? req.body.content : '';
+  const filename = String(req.body?.filename ?? '').slice(0, 260);
+  if (!isXlsx(filename)) {
+    return res.status(400).json({ error: 'Only .xlsx workbooks have sheets to choose from.' });
+  }
+  try {
+    res.json({ sheets: await excelImport.listSheets(content) });
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+router.post('/import', async (req, res, next) => {
   try {
     const content = typeof req.body?.content === 'string' ? req.body.content : '';
     const filename = String(req.body?.filename ?? '').slice(0, 260);
+    const xlsx = isXlsx(filename);
 
     if (!content.trim()) {
       return res.status(400).json({ error: 'The file was empty.' });
     }
-    if (Buffer.byteLength(content, 'utf8') > MAX_CONTENT_BYTES) {
+    // A workbook arrives base64-encoded; excelImport enforces its limit on the
+    // decoded bytes.
+    if (!xlsx && Buffer.byteLength(content, 'utf8') > MAX_CONTENT_BYTES) {
       return res.status(400).json({ error: 'That file is too large to import (limit 2 MB).' });
     }
 
     let built;
-    if (looksLikeJson(content, filename)) {
+    if (xlsx) {
+      const sheetName = String(req.body?.sheet ?? '').slice(0, 200);
+      if (!sheetName) return res.status(400).json({ error: 'Choose which sheet to import.' });
+      try {
+        built = buildFromSheet(await excelImport.parseSheet(content, sheetName));
+      } catch (e) {
+        return res.status(400).json({ error: e.message });
+      }
+    } else if (looksLikeJson(content, filename)) {
       let parsed;
       try {
         parsed = JSON.parse(content);
@@ -173,14 +217,16 @@ router.post('/import', (req, res, next) => {
 
     if (!built.scenarios.length) {
       return res.status(400).json({
-        error: 'No test cases were found in that file. Expected a .feature file or a JSON share file exported from this app.',
+        error: 'No test cases were found in that file. Expected a .feature file, a JSON share file exported from this app, or an Excel sheet with Summary and Test Steps columns.',
       });
     }
 
     const run = {
       id: crypto.randomUUID(),
       createdAt: new Date().toISOString(),
-      input: `Imported from ${filename || 'a shared file'}`,
+      input: xlsx
+        ? `Imported from ${filename}, sheet "${built.featureTitle}"`
+        : `Imported from ${filename || 'a shared file'}`,
       sourceUrl: null,
       importedFrom: filename || null,
       importedAt: new Date().toISOString(),

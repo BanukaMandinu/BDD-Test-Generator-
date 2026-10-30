@@ -33,21 +33,95 @@
   </header>
 
   <main>
-    <section id="generatePanel" class="panel">
-      <div class="intro-box">
-        <p class="intro-lead">Paste a link to a site, or just describe what you want tested — then pick how:</p>
-        <ul class="intro-list">
-          <li><strong>Generate</strong> — writes tests straight from what you typed.</li>
-          <li><strong>Explore site</strong> — crawls the site automatically, then you pick which pages to cover.</li>
-          <li><strong>Record a flow</strong> — opens a real browser for you to click through by hand. Best for sites that sign in with Google/Microsoft/SSO, since automated sign-in there usually gets blocked.</li>
-        </ul>
+    <section id="generatePanel" class="panel hero">
+      <div id="startBar" class="start-bar">
+        <span class="muted-text">Start another run, or import test cases</span>
+        <button id="newRunBtn" class="secondary" type="button">+ New test run</button>
+      </div>
+      <h2 class="hero-title">What do you want to test?</h2>
+      <p class="hero-sub">Paste a link or describe a feature, then choose how to start.</p>
+
+      <label class="sr-only" for="inputText">Link or description</label>
+      <textarea id="inputText" rows="3" placeholder="e.g. https://my-app.com/login — or: users can reset their password by email"></textarea>
+      <p id="urlGateHint" class="notice hidden">That's just a link — explore the site first.</p>
+
+      <div class="actions-row start-row">
+        <button id="generateBtn" class="primary big" title="Write tests straight from what you typed above">Generate tests</button>
+        <button id="discoverBtn" class="secondary" title="Map the site's pages, then pick which to cover">Explore site</button>
+        <button id="recordBtn" class="secondary" title="Open a real browser, click through it yourself, and write tests from exactly what you did">Record a flow</button>
+        <span id="generateStatus" class="status"></span>
+      </div>
+      <p class="start-hint"><strong>Explore site</strong> maps the pages so you can pick which to cover. <strong>Record a flow</strong> lets you click through by hand — best for Google/SSO sign-in.</p>
+
+      <!-- Page picker, shown after a discovery crawl. -->
+      <div id="pagePicker" class="card hidden">
+        <div class="card-row">
+          <span class="card-title">Pages found</span>
+          <span class="mini-actions">
+            <button id="pagesAllBtn" class="link-btn">All</button>
+            <button id="pagesNoneBtn" class="link-btn">None</button>
+            <button id="pagesFormsBtn" class="link-btn">Forms only</button>
+          </span>
+        </div>
+        <div id="pageList" class="page-list"></div>
+        <div class="actions-row">
+          <button id="generateFromPagesBtn" class="primary">Generate</button>
+          <span id="pagePickerStatus" class="status"></span>
+        </div>
       </div>
 
-      <!-- Everything optional lives here, collapsed by default. -->
-      <div id="optionsPanel" class="options">
-        <div class="field-group">
-          <span class="card-title">Access &amp; behavior</span>
-          <label class="toggle-line" for="refineToggle">
+      <!-- Recording panel: shown once "Record a flow" opens a browser window. -->
+      <div id="recordPanel" class="card hidden">
+        <div class="card-row">
+          <span class="card-title">Recording</span>
+          <span id="recordStatus" class="muted-text">A browser window is open — click through your test, then Save test in its overlay.</span>
+        </div>
+        <div id="recordFlowList" class="page-list"></div>
+        <div class="actions-row">
+          <button id="generateFromRecordingsBtn" class="primary" disabled>Generate from recordings</button>
+          <button id="recordCancelBtn" class="link-btn">Discard session</button>
+          <span id="recordPanelStatus" class="status"></span>
+        </div>
+      </div>
+
+      <div id="activityLog" class="terminal hidden">
+        <div class="terminal-head">Activity</div>
+        <ul id="activityItems"></ul>
+      </div>
+
+      <div class="folds">
+        <details class="fold">
+          <summary><span class="fold-title">Test types</span><span id="typeCount" class="fold-meta"></span></summary>
+          <div class="fold-body">
+            <div class="card-row">
+              <span class="muted-text">Each ticked type becomes a kind of test the generator must write.</span>
+              <span class="mini-actions">
+                <button id="typeAllBtn" class="link-btn">All</button>
+                <button id="typeDefaultsBtn" class="link-btn">Reset</button>
+              </span>
+            </div>
+            <div id="typeGrid" class="type-grid"></div>
+          </div>
+        </details>
+
+        <details class="fold">
+          <summary><span class="fold-title">Context &amp; spec file</span><span class="fold-meta">optional</span></summary>
+          <div class="fold-body field-group" id="productInfoZone">
+            <label class="field-label" for="extraInstructions">Context <span class="muted-text">(optional)</span></label>
+        <textarea id="extraInstructions" rows="2" placeholder="Product notes, the flow to focus on…"></textarea>
+        <div class="inline-row">
+          <input type="file" id="productInfoFile" accept=".txt,.md,.pdf,.docx" hidden />
+          <button id="productInfoBtn" class="link-btn" title="Extracts text from a .txt, .md, .pdf, or .docx into the box above">+ Attach a spec file</button>
+          <span id="productInfoStatus" class="status"></span>
+        </div>
+        <ul id="productInfoWarnings" class="notice-list hidden"></ul>
+          </div>
+        </details>
+
+        <details class="fold">
+          <summary><span class="fold-title">Advanced options</span><span class="fold-meta">review pass, sign-in, interaction</span></summary>
+          <div id="optionsPanel" class="fold-body options">
+            <label class="toggle-line" for="refineToggle">
             <input type="checkbox" id="refineToggle" checked />
             <span>Review draft before showing it <span class="muted-text">— cleans up wording, ~2× slower</span></span>
           </label>
@@ -94,86 +168,30 @@
             </div>
             <p class="micro-note">Only used to sign in. Never saved or exported.</p>
           </div>
-        </div>
+          </div>
+        </details>
       </div>
 
-      <label class="field-label" for="inputText">Paste link</label>
-      <textarea id="inputText" rows="2" placeholder="Paste a link, or describe what to test…"></textarea>
-      <p id="urlGateHint" class="notice hidden">That's just a link — explore the site first.</p>
-
-      <div class="field-group" id="productInfoZone">
-        <label class="field-label" for="extraInstructions">Context <span class="muted-text">(optional)</span></label>
-        <textarea id="extraInstructions" rows="2" placeholder="Product notes, the flow to focus on…"></textarea>
+      <div id="importZone" class="import-zone">
         <div class="inline-row">
-          <input type="file" id="productInfoFile" accept=".txt,.md,.pdf,.docx" hidden />
-          <button id="productInfoBtn" class="link-btn" title="Extracts text from a .txt, .md, .pdf, or .docx into the box above">+ Attach a spec file</button>
-          <span id="productInfoStatus" class="status"></span>
-        </div>
-        <ul id="productInfoWarnings" class="notice-list hidden"></ul>
-      </div>
-
-      <div class="field-group">
-        <div class="card-row">
-          <span class="card-title">Test types</span>
-          <span class="mini-actions">
-            <button id="typeAllBtn" class="link-btn">All</button>
-            <button id="typeDefaultsBtn" class="link-btn">Reset</button>
-          </span>
-        </div>
-        <div id="typeGrid" class="type-grid"></div>
-      </div>
-
-      <div class="actions-row">
-        <button id="generateBtn" class="primary" title="Write tests straight from what you typed above">Generate</button>
-        <button id="discoverBtn" class="secondary" title="Map the site's pages, then pick which to cover">Explore site</button>
-        <button id="recordBtn" class="secondary" title="Open a real browser, click through it yourself, and write tests from exactly what you did">Record a flow</button>
-        <span id="generateStatus" class="status"></span>
-      </div>
-
-      <div id="importZone" class="field-group">
-        <div class="inline-row">
-          <input type="file" id="importFile" accept=".feature,.json,.txt" hidden />
-          <button id="importBtn" class="link-btn">+ Import a .feature or .testrun.json</button>
+          <input type="file" id="importFile" accept=".feature,.json,.txt,.xlsx" hidden />
+          <button id="importBtn" class="link-btn">Choose a file…</button>
           <span id="importStatus" class="status"></span>
+        </div>
+        <!-- Shown when an uploaded workbook has more than one sheet. -->
+        <div id="sheetPicker" class="sheet-picker hidden">
+          <div class="sheet-picker-head">
+            <strong id="sheetPickerTitle">Choose a sheet</strong>
+            <button id="sheetPickerCancel" class="link-btn">Cancel</button>
+          </div>
+          <div id="sheetList" class="sheet-list" role="radiogroup" aria-label="Sheets in this workbook"></div>
+          <div class="inline-row">
+            <button id="sheetImportBtn" class="primary">Import this sheet</button>
+          </div>
         </div>
         <ul id="importWarnings" class="notice-list hidden"></ul>
       </div>
 
-      <!-- Page picker, shown after a discovery crawl. -->
-      <div id="pagePicker" class="card hidden">
-        <div class="card-row">
-          <span class="card-title">Pages found</span>
-          <span class="mini-actions">
-            <button id="pagesAllBtn" class="link-btn">All</button>
-            <button id="pagesNoneBtn" class="link-btn">None</button>
-            <button id="pagesFormsBtn" class="link-btn">Forms only</button>
-          </span>
-        </div>
-        <div id="pageList" class="page-list"></div>
-        <div class="actions-row">
-          <button id="generateFromPagesBtn" class="primary">Generate</button>
-          <span id="pagePickerStatus" class="status"></span>
-        </div>
-      </div>
-
-      <!-- Recording panel: shown once "Record a flow" opens a browser window. -->
-      <div id="recordPanel" class="card hidden">
-        <div class="card-row">
-          <span class="card-title">Recording</span>
-          <span id="recordStatus" class="muted-text">A browser window is open — click through your test, then Save test in its overlay.</span>
-        </div>
-        <div id="recordFlowList" class="page-list"></div>
-        <div class="actions-row">
-          <button id="generateFromRecordingsBtn" class="primary" disabled>Generate from recordings</button>
-          <button id="recordCancelBtn" class="link-btn">Discard session</button>
-          <span id="recordPanelStatus" class="status"></span>
-        </div>
-      </div>
-
-      <div id="activityLog" class="terminal hidden">
-        <div class="terminal-head">Activity</div>
-        <ul id="activityItems"></ul>
-      </div>
     </section>
 
     <section id="resultsPanel" class="panel hidden">
@@ -209,8 +227,8 @@
           <ul id="refineNotesList"></ul>
         </div>
 
-        <div class="card">
-          <div class="card-title">Update every test case at once</div>
+        <details class="card bulk-card">
+          <summary class="card-title">Update every test case at once</summary>
           <p class="muted-text">One note, applied to <strong>ticked</strong> cases and steps only.</p>
           <div class="review-row">
             <textarea id="bulkReviewInput" class="review-input" placeholder="e.g. 'use the exact button labels from the site'"></textarea>
@@ -221,11 +239,11 @@
             <div class="terminal-head">Activity</div>
             <ul id="bulkActivityItems"></ul>
           </div>
-        </div>
+        </details>
 
         <div id="scenarioList"></div>
 
-        <div class="actions-row">
+        <div class="actions-row action-bar">
           <button id="addScenarioBtn" class="secondary">+ Add scenario</button>
           <button id="saveRunBtn" class="primary">Save changes</button>
 

@@ -117,10 +117,11 @@ body {
   background: linear-gradient(135deg, var(--primary), var(--primary-hover));
   flex-shrink: 0;
 }
-.header-actions { display: flex; align-items: center; gap: 10px; }
+.header-actions { display: flex; align-items: center; gap: 10px; min-width: 0; }
 .app-header select {
   padding: 6px 10px; border-radius: var(--radius-sm); border: 1px solid var(--border);
   font-family: inherit; font-size: 12.5px; color: var(--muted); background: var(--surface);
+  max-width: 280px; text-overflow: ellipsis;
 }
 .icon-btn {
   display: flex; align-items: center; justify-content: center;
@@ -232,6 +233,93 @@ button:disabled { opacity: 0.55; cursor: not-allowed; transform: none; }
 .intro-list { margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 5px; }
 .intro-list li { font-size: 12px; color: var(--muted); line-height: 1.5; }
 .intro-list strong { color: var(--primary-hover); }
+/* ---------------------------------------------------------------- start screen
+   One question, one box, one obvious button. Everything optional is folded away. */
+.sr-only {
+  position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0; overflow: hidden;
+  clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0;
+}
+.hero { padding: 28px 28px 22px; }
+.hero-title { margin: 0 0 4px; font-family: Manrope, inherit; font-size: 24px; font-weight: 800; letter-spacing: -0.01em; }
+.hero-sub { margin: 0 0 16px; color: var(--muted); font-size: 14px; }
+.hero #inputText { font-size: 15px; padding: 14px 16px; border-radius: var(--radius); min-height: 92px; }
+.start-row { margin-top: 14px; gap: 8px; }
+button.big { padding: 11px 24px; font-size: 14.5px; border-radius: 8px; }
+.start-row .secondary { padding: 10px 16px; }
+.start-hint { margin: 10px 0 0; font-size: 12px; color: var(--muted); line-height: 1.55; }
+.start-hint strong { color: var(--text); font-weight: 600; }
+
+.folds { margin-top: 22px; border-top: 1px solid var(--border); }
+.fold { border-bottom: 1px solid var(--border); }
+.fold > summary {
+  list-style: none; cursor: pointer; display: flex; align-items: center; gap: 10px;
+  padding: 13px 2px; font-size: 13.5px; user-select: none;
+}
+.fold > summary::-webkit-details-marker { display: none; }
+.fold > summary::before {
+  content: ''; width: 7px; height: 7px; flex-shrink: 0; margin-right: 2px;
+  border-right: 2px solid var(--faint); border-bottom: 2px solid var(--faint);
+  transform: rotate(-45deg); transition: transform 0.15s ease;
+}
+.fold[open] > summary::before { transform: rotate(45deg); }
+.fold > summary:hover .fold-title { color: var(--primary); }
+.fold > summary:focus-visible { outline: 2px solid var(--primary); outline-offset: 2px; border-radius: 4px; }
+.fold-title { font-weight: 600; }
+.fold-meta { color: var(--muted); font-size: 12px; }
+.fold-body { padding: 2px 2px 16px 19px; margin-top: 0; }
+.fold-body.options { margin-top: 0; padding-top: 2px; border-top: 0; }
+.fold-body .toggle-line { margin-top: 6px; }
+
+.start-bar { display: none; align-items: center; justify-content: space-between; gap: 12px; }
+.hero.compact { padding: 12px 18px; }
+.hero.compact > *:not(.start-bar) { display: none; }
+.hero.compact > .start-bar { display: flex; }
+
+/* Summary-style card heading: the whole line is the click target. */
+.bulk-card > summary { cursor: pointer; list-style: none; user-select: none; }
+.bulk-card > summary::-webkit-details-marker { display: none; }
+.bulk-card > summary::before { content: '+'; display: inline-block; width: 14px; color: var(--faint); font-weight: 700; }
+.bulk-card[open] > summary::before { content: '−'; }
+.bulk-card[open] > summary { margin-bottom: 6px; }
+
+/* Save / Download stay reachable however long the list gets. */
+.action-bar {
+  position: sticky; bottom: 0; z-index: 5; margin: 16px -20px -20px; padding: 12px 20px;
+  background: var(--panel); border-top: 1px solid var(--border);
+  border-radius: 0 0 var(--radius) var(--radius); box-shadow: 0 -6px 14px rgba(20, 24, 40, 0.06);
+}
+
+.import-zone {
+  margin-top: 18px; padding: 14px 16px; border: 1.5px dashed var(--border);
+  border-radius: var(--radius); background: var(--surface-alt);
+}
+.import-zone .inline-row { margin-top: 0; }
+.import-zone::before {
+  content: 'Already have test cases? Drop a .feature, .testrun.json or Excel file here, or choose one.';
+  display: block; margin-bottom: 8px; font-size: 12.5px; color: var(--muted);
+}
+.import-zone.dragging { border-color: var(--primary); }
+
+.sheet-picker {
+  margin-top: 10px; padding: 12px 14px; border: 1px solid var(--border);
+  border-radius: var(--radius-sm); background: var(--panel);
+}
+.sheet-picker.hidden { display: none; }
+.sheet-picker-head { display: flex; justify-content: space-between; align-items: center; gap: 10px; font-size: 12.5px; }
+.sheet-list { display: flex; flex-direction: column; gap: 6px; margin: 10px 0 4px; max-height: 220px; overflow-y: auto; }
+.sheet-option {
+  display: flex; align-items: center; gap: 10px; padding: 7px 10px; cursor: pointer;
+  border: 1px solid var(--border); border-radius: var(--radius-sm); font-size: 12.5px;
+}
+.sheet-option:hover { border-color: var(--primary); }
+.sheet-option:has(input:checked) { border-color: var(--primary); background: var(--primary-tint); }
+.sheet-option .sheet-name { font-weight: 600; flex: 1; overflow-wrap: anywhere; }
+.sheet-option .sheet-meta { color: var(--muted); font-size: 11.5px; white-space: nowrap; }
+.sheet-option.dim .sheet-name { font-weight: 400; color: var(--muted); }
+.test-id-badge {
+  font-size: 11px; font-weight: 600; padding: 2px 8px; border-radius: 999px; white-space: nowrap;
+  border: 1px solid var(--border); color: var(--muted); background: var(--panel);
+}
 .inline-row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-top: 8px; }
 .mini-actions { display: flex; gap: 8px; }
 
@@ -423,7 +511,7 @@ kbd {
 
 .export-menu { position: relative; display: inline-block; }
 .export-options {
-  position: absolute; top: calc(100% + 5px); left: 0; z-index: 20;
+  position: absolute; bottom: calc(100% + 5px); left: 0; z-index: 20;
   display: flex; flex-direction: column; min-width: 260px;
   background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-sm);
   box-shadow: var(--popover-shadow); overflow: hidden;

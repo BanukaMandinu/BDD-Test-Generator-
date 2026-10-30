@@ -8,7 +8,7 @@ Generation runs through your **local Claude Code CLI** (`claude`), not a separat
 
 ## Download (Windows)
 
-A prebuilt Windows installer (Electron desktop app — bundles its own Node.js runtime, no separate Node install needed) is published under [Releases](../../releases/latest) — download `BDD-Test-Generator-Setup-1.0.0.exe` and run it. Claude Code still needs to be installed and logged in on the machine it runs on (see [Requirements](#requirements)).
+A prebuilt Windows installer (Electron desktop app — bundles its own Node.js runtime, no separate Node install needed) is published under [Releases](../../releases/latest) — download the latest `BDD Test Generator Setup x.y.z.exe` and run it. Claude Code still needs to be installed and logged in on the machine it runs on (see [Requirements](#requirements)).
 
 ## Requirements
 
@@ -44,6 +44,7 @@ server/            Express backend (API + static file serving)
     gherkin.js        .feature text and aligned data-table rendering
     featureParser.js  Parses a .feature file back in (import), incl. outlines and tables
     excel.js          Workbook builder (Summary / Test Cases / Traceability)
+    excelImport.js    Reads an uploaded .xlsx back in: lists its sheets, parses the chosen one
     store.js          Saves/loads each generation run as a JSON file in data/runs
     session.js        Borrowing a signed-in session from your own browser: the
                        console snippet, and conversion to a Playwright storageState
@@ -237,6 +238,16 @@ You can hand a run to someone else and they can carry on reviewing, revising and
 
 **To receive:** drop the file onto **"Someone sent you a file?"** at the top of the page, or click *Choose a file*. It becomes a new run — reviewable, revisable with **Update** / **Update all**, and re-exportable in any format. It never overwrites your existing runs.
 
+### Importing an Excel sheet
+
+Drop a `.xlsx` workbook onto the import box (or click **Import…**). If it has more than one sheet, a picker lists them — hidden sheets are left out, and sheets with no Given/When/Then steps are dimmed — and you choose the one to bring in. It opens in the same Test Cases editor as any other run, so you can edit, tick, review-and-Update, and re-export it.
+
+- One row becomes one test case. Columns are found by header name: **Test ID**, **Summary** (title), **Description**, **Test Steps** (Gherkin, including an `Examples:` table). Priority and Test Type are ignored. With no header row, columns A–D are read in that order.
+- **Test IDs are kept** (shown as a badge on the card, and reused on Excel export), so TC-02 stays TC-02.
+- Rows with no recognisable steps are skipped, and the app lists which.
+- The sheet name becomes the feature title. It becomes a new run; your workbook is never modified — export produces a new file.
+- Cells are read as text only (formulas are never evaluated); 2 MB and 2,000-row caps apply.
+
 A `.feature` file carries no requirements list, so the **Coverage** tab starts empty when you import one (the app tells you). Test types are recovered from `@tags`, so a file this app produced keeps them. That's why the JSON share file is the better handoff.
 
 Imports are treated as untrusted input: 2 MB cap, bounded scenario/step/row counts, fresh ids assigned throughout, and `Background:` / `Rule:` blocks are flattened rather than dropped — with a note telling you what changed.
@@ -292,7 +303,7 @@ With it on, it additionally gets click/type/fill/select/press-key, so it can sub
 npm test
 ```
 
-29 offline tests covering the parts where a regression would silently corrupt someone's test cases: step reconciliation (unticked steps must never be lost), the quality checks, Gherkin export formatting and escaping, and type resolution. No Claude calls, so it runs in under a second.
+100+ offline tests covering the parts where a regression would silently corrupt someone's test cases: step reconciliation (unticked steps must never be lost), the quality checks, Gherkin export formatting and escaping, and type resolution. No Claude calls, so it runs in under a second.
 
 ## Limitations
 
