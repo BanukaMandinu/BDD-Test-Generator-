@@ -155,8 +155,8 @@ async function parseSheet(base64, sheetName) {
       skipped.push(testId || `row ${r}`);
       continue;
     }
-    // The export appends " (outline — N cases)" to the summary; take it off so
-    // a round trip doesn't stack the suffix.
+    // Older exports appended " (outline — N cases)" to the summary; take it off so
+    // re-importing one doesn't keep the tag.
     scenario.title = scenario.title.replace(/\s*\(outline\s*[—-]\s*\d+ cases?\)\s*$/i, '');
     // Each test case keeps its own description; the feature only takes one when
     // every row shares it (below).

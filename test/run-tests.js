@@ -1233,6 +1233,32 @@ async function excelImportTests() {
     assert.deepStrictEqual(descriptions, ['Instructor checks the Previous button', 'Instructor clicks Previous']);
   });
 
+  await asyncTest('an outline is exported with its plain title — no "(outline — N cases)" tag anywhere in the workbook', async () => {
+    const { buildWorkbook } = require('../server/lib/excel');
+    const run = {
+      featureTitle: 'Menu Items', featureDescription: '', createdAt: new Date().toISOString(), requirements: [],
+      scenarios: [scenario('o', 'Verify Previous is disabled', [step('1', 'Given', 'the <user> is on the first slide'), step('2', 'Then', 'the button is disabled')],
+        { isOutline: true, examples: [['user'], ['Instructor'], ['Student']] })],
+    };
+    const out = new ExcelJS.Workbook();
+    await out.xlsx.load(await buildWorkbook(run));
+    const rows = out.getWorksheet('Test Cases');
+    assert.strictEqual(rows.getRow(2).getCell(2).value, 'Verify Previous is disabled');
+    assert.match(String(rows.getRow(2).getCell(4).value), /Examples:/, 'the Examples table is still there');
+    out.eachSheet((sheet) => sheet.eachRow((row) => row.eachCell((cell) => {
+      assert.ok(!/outline\s*[—-]\s*\d+ cases?/i.test(String(cell.value)), `found the tag in ${sheet.name}: ${cell.value}`);
+    })));
+  });
+
+  await asyncTest('re-importing an older export strips the tag from the title', async () => {
+    const tagged = new ExcelJS.Workbook();
+    const s = tagged.addWorksheet('Old');
+    s.addRow(['Test ID', 'Summary', 'Test Steps']);
+    s.addRow(['TC-01', 'Verify it works (outline — 1 cases)', 'Given a page\nWhen it loads\nThen it works']);
+    const r = await parseSheet(Buffer.from(await tagged.xlsx.writeBuffer()).toString('base64'), 'Old');
+    assert.strictEqual(r.scenarios[0].title, 'Verify it works');
+  });
+
   await asyncTest('a test case with no description of any kind gets a blank cell, not the feature title', async () => {
     const { buildWorkbook } = require('../server/lib/excel');
     const run = {

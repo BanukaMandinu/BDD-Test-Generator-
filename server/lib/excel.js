@@ -102,7 +102,9 @@ function addTestCasesSheet(workbook, run) {
       // An imported sheet keeps its own IDs (TC-02 stays TC-02) so edits land back
       // against the same rows in the tracker.
       testId: scenario.testId || `${prefix}-${String(i + 1).padStart(3, '0')}`,
-      summary: isOutline(scenario) ? `${scenario.title} (outline — ${exampleRowCount(scenario)} cases)` : scenario.title,
+      // The title only — no "(outline — N cases)" tag. An outline still shows its
+      // Examples table under the steps, which is what says how many times it runs.
+      summary: scenario.title,
       // The test case's own description first (an imported sheet keeps each row's),
       // then the requirement it covers. Repeating the feature title on every row
       // told the reader nothing, so a case with neither is left blank.
