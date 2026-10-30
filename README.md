@@ -8,7 +8,7 @@ Generation runs through your **local Claude Code CLI** (`claude`), not a separat
 
 ## Download (Windows)
 
-A prebuilt Windows installer (Electron desktop app — bundles its own Node.js runtime, no separate Node install needed) is published under [Releases](../../releases/latest) — download the latest `BDD Test Generator Setup x.y.z.exe` and run it. Claude Code still needs to be installed and logged in on the machine it runs on (see [Requirements](#requirements)).
+A prebuilt Windows installer (Electron desktop app — bundles its own Node.js runtime, no separate Node install needed) is published under [Releases](../../releases/latest) — download the latest `BDD-Test-Generator-Setup-x.y.z.exe` and run it. Claude Code still needs to be installed and logged in on the machine it runs on (see [Requirements](#requirements)).
 
 ## Requirements
 
