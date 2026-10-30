@@ -30,6 +30,7 @@ function shortTitle(title, max = 70) {
 function fingerprint(scenario) {
   return JSON.stringify([
     scenario.title,
+    scenario.description || null,
     Boolean(scenario.isOutline),
     scenario.examples || null,
     (scenario.steps || []).map((s) => [s.keyword, s.text, s.dataTable || null, s.included !== false]),

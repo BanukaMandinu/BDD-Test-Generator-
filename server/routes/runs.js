@@ -3,6 +3,7 @@ const express = require('express');
 const { loadRun, saveRun, listRuns } = require('../lib/store');
 const {
   reviseScenario,
+  describeScenario,
   generateScenarioFromTitle,
   generateScenariosFromRecordings,
   reviseAllScenarios,
@@ -20,6 +21,8 @@ const {
   newScenarioFromModel,
   formatExamplesForPrompt,
   applyOutlineFromModel,
+  applyDescriptionFromModel,
+  cleanDescription,
 } = require('../lib/revise');
 const audit = require('../lib/audit');
 const { originFromUrl } = require('../lib/session');
@@ -137,6 +140,7 @@ router.post('/runs/:id/scenarios/:scenarioId/update', async (req, res, next) => 
     });
 
     scenario.title = revised.title || scenario.title;
+    applyDescriptionFromModel(scenario, revised);
     scenario.steps = reconcileSteps(scenario.steps, revised.steps);
     applyOutlineFromModel(scenario, revised);
     scenario.review = '';
@@ -184,6 +188,8 @@ router.post('/runs/:id/scenarios/:scenarioId/generate', async (req, res, next) =
     });
 
     scenario.title = generated.title || title;
+    // A description the reviewer already typed is theirs; the model only fills a blank.
+    if (!scenario.description) applyDescriptionFromModel(scenario, generated);
     scenario.testType = validTypeIds.has(generated.testType) ? generated.testType : null;
     scenario.steps = (generated.steps || []).map((st) => ({
       id: crypto.randomUUID(),
@@ -195,10 +201,63 @@ router.post('/runs/:id/scenarios/:scenarioId/generate', async (req, res, next) =
     applyOutlineFromModel(scenario, generated);
     scenario.isDraft = false;
 
+    // The description is optional in the model's reply and easy to skip. A new test
+    // case should always get one, so ask for it on its own if it did not come back.
+    if (!scenario.description) {
+      try {
+        applyDescriptionFromModel(scenario, await describeScenario({
+          scenario,
+          featureTitle: run.featureTitle,
+          featureDescription: run.featureDescription,
+          requirements: run.requirements,
+          formattedSteps: formatStepsForPrompt(scenario.steps),
+        }));
+      } catch (err) {
+        console.error('describe after generate failed:', err.message); // the test case itself is fine without it
+      }
+    }
+
     run.quality = quality.inspect(run);
     saveRun(run);
     audit.record('generate-scenario', { runId: run.id, detail: scenario.id });
     res.json(scenario);
+  } catch (err) {
+    next(err);
+  }
+});
+
+// Writes (or rewrites) one test case's Description from its title and steps.
+router.post('/runs/:id/scenarios/:scenarioId/describe', async (req, res, next) => {
+  try {
+    const run = getRunOr404(req, res);
+    if (!run) return;
+
+    const scenario = run.scenarios.find((s) => s.id === req.params.scenarioId);
+    if (!scenario) return res.status(404).json({ error: 'scenario not found' });
+
+    if (!scenario.steps.some((st) => st.included !== false && String(st.text || '').trim())) {
+      return res.status(400).json({ error: 'Add some steps first — the description is worked out from them.' });
+    }
+
+    versions.snapshot(run, `describe: ${scenario.title}`);
+
+    const result = await describeScenario({
+      scenario,
+      featureTitle: run.featureTitle,
+      featureDescription: run.featureDescription,
+      requirements: run.requirements,
+      formattedSteps: formatStepsForPrompt(scenario.steps),
+    });
+
+    const description = cleanDescription(result?.description);
+    if (!description) {
+      return res.status(502).json({ error: 'No description came back. Try again.' });
+    }
+    scenario.description = description;
+
+    saveRun(run);
+    audit.record('describe-scenario', { runId: run.id, detail: scenario.id });
+    res.json({ description });
   } catch (err) {
     next(err);
   }
@@ -266,7 +325,10 @@ router.post('/runs/:id/scenarios/from-recordings', async (req, res) => {
         const hasPlaceholders = steps.some((st) => placeholdersInStep(st).length > 0);
         const outline = Boolean(s.isOutline || hasPlaceholders) && Boolean(examples);
 
+        const description = cleanDescription(s.description);
+
         return {
+          ...(description ? { description } : {}),
           title: s.title,
           testType: validTypeIds.has(s.testType) ? s.testType : null,
           isOutline: outline,
@@ -283,6 +345,7 @@ router.post('/runs/:id/scenarios/from-recordings', async (req, res) => {
     if (targetScenario) {
       const [first, ...rest] = added;
       targetScenario.title = first.title || targetScenario.title;
+      if (first.description) targetScenario.description = first.description;
       targetScenario.testType = first.testType;
       targetScenario.isOutline = first.isOutline;
       targetScenario.examples = first.examples;
@@ -372,8 +435,11 @@ router.post('/runs/:id/fill-gaps', async (req, res) => {
         const hasPlaceholders = steps.some((st) => placeholdersInStep(st).length > 0);
         const outline = Boolean(s.isOutline || hasPlaceholders) && Boolean(examples);
 
+        const description = cleanDescription(s.description);
+
         return {
           id: crypto.randomUUID(),
+          ...(description ? { description } : {}),
           title: s.title,
           testType: validTypeIds.has(s.testType) ? s.testType : null,
           included: true,
@@ -504,6 +570,7 @@ router.post('/runs/:id/update-all', async (req, res) => {
 
       if (scenario) {
         scenario.title = returned.title || scenario.title;
+        applyDescriptionFromModel(scenario, returned);
         scenario.steps = reconcileSteps(scenario.steps, returned.steps);
         applyOutlineFromModel(scenario, returned);
         scenario.review = '';

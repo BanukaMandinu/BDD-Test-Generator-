@@ -956,6 +956,71 @@ group('update all — website check prompt', () => {
   });
 });
 
+group('description — each test case’s precondition', () => {
+  const { applyDescriptionFromModel, newScenarioFromModel, cleanDescription, formatScenarioForPrompt } = require('../server/lib/revise');
+  const prompts = require('../server/lib/prompts');
+
+  test('a model reply with a description replaces the current one', () => {
+    const s = { description: 'old' };
+    applyDescriptionFromModel(s, { description: '  The user is signed in as an Instructor  ' });
+    assert.strictEqual(s.description, 'The user is signed in as an Instructor');
+  });
+
+  test('an empty, missing or non-text reply never wipes what the reviewer wrote', () => {
+    for (const reply of [{}, { description: '' }, { description: '   ' }, { description: null }, { description: 42 }]) {
+      const s = { description: 'keep me' };
+      applyDescriptionFromModel(s, reply);
+      assert.strictEqual(s.description, 'keep me');
+    }
+  });
+
+  test('a new scenario carries its description, and has no field when there is none', () => {
+    const withIt = newScenarioFromModel({ title: 'T', description: 'Signed in as an Instructor', steps: [{ keyword: 'Given', text: 'a page' }] });
+    assert.strictEqual(withIt.description, 'Signed in as an Instructor');
+    const without = newScenarioFromModel({ title: 'T', steps: [{ keyword: 'Given', text: 'a page' }] });
+    assert.ok(!('description' in without));
+  });
+
+  test('a very long description is capped', () => {
+    assert.strictEqual(cleanDescription('x'.repeat(5000)).length, 2000);
+  });
+
+  test('the model is shown each case’s current description', () => {
+    const s = scenario('a', 'Open it', [step('1', 'Given', 'a page')], { description: 'Signed in as an Instructor' });
+    assert.match(formatScenarioForPrompt(s, 1), /Description \(precondition\): Signed in as an Instructor/);
+    assert.match(formatScenarioForPrompt(scenario('b', 'No desc', [step('2', 'Given', 'a page')]), 2), /Description \(precondition\): \(none\)/);
+  });
+
+  test('the describe prompt carries the title and steps and asks for a precondition, not a summary', () => {
+    const p = prompts.buildDescribeUserPrompt({
+      scenario: scenario('a', 'Verify the break timer starts', []),
+      featureTitle: 'Course player',
+      featureDescription: '',
+      requirements: [],
+      formattedSteps: '1. [REVISE] Given the Instructor is in the course player',
+    });
+    assert.match(p, /PRECONDITION/);
+    assert.match(p, /Verify the break timer starts/);
+    assert.match(p, /Instructor is in the course player/);
+    assert.match(p, /must not repeat the title/);
+    assert.match(p, /"description"/);
+  });
+
+  test('new test cases are told a description is mandatory', () => {
+    const p = prompts.buildScenarioFromTitlePrompt({ title: 'T', featureTitle: 'F', featureDescription: '', requirements: [], url: null, types: [{ id: 'happy-path', label: 'Happy path', guidance: 'g' }] });
+    assert.match(p, /ALWAYS write one/);
+    const all = prompts.buildUpdateAllUserPrompt({ featureTitle: 'F', featureDescription: '', requirements: [], formattedScenarios: 'x', review: 'r' });
+    assert.match(all, /Every new scenario MUST have its "description"/);
+  });
+
+  test('every prompt that writes test cases asks for the description as a precondition', () => {
+    const base = { featureTitle: 'F', featureDescription: '', requirements: [], types: [{ id: 'happy-path', label: 'Happy path', guidance: 'g' }] };
+    assert.match(prompts.buildUpdateAllUserPrompt({ ...base, formattedScenarios: 'x', review: 'r' }), /"description"/);
+    assert.match(prompts.buildUpdateUserPrompt({ scenario: scenario('a', 'T', []), requirements: [], review: 'r', formattedSteps: '' }), /"description"/);
+    assert.match(prompts.buildScenarioFromTitlePrompt({ title: 'T', featureTitle: 'F', featureDescription: '', requirements: [], url: null, types: base.types }), /PRECONDITION/);
+  });
+});
+
 group('autofix — repairing what the quality check reports', () => {
   const autofix = require('../server/lib/autofix');
   const cucumberChecks = require('../server/lib/cucumberChecks');
@@ -1155,6 +1220,29 @@ async function excelImportTests() {
     await out.xlsx.load(await buildWorkbook(run));
     const ids = out.getWorksheet('Test Cases').getColumn(1).values.slice(2);
     assert.deepStrictEqual(ids, ['TC-02', 'TC-03']);
+  });
+
+  await asyncTest('Excel export puts each imported row back in its own Description, not the feature title', async () => {
+    const { buildWorkbook } = require('../server/lib/excel');
+    const r = await parseSheet(base64, 'Menu Items');
+    assert.strictEqual(r.featureDescription, '', 'the rows differ, so there is no shared feature description');
+    const run = { featureTitle: 'Menu Items', featureDescription: r.featureDescription, createdAt: new Date().toISOString(), requirements: [], scenarios: r.scenarios };
+    const out = new ExcelJS.Workbook();
+    await out.xlsx.load(await buildWorkbook(run));
+    const descriptions = out.getWorksheet('Test Cases').getColumn(3).values.slice(2);
+    assert.deepStrictEqual(descriptions, ['Instructor checks the Previous button', 'Instructor clicks Previous']);
+  });
+
+  await asyncTest('a test case with no description of any kind gets a blank cell, not the feature title', async () => {
+    const { buildWorkbook } = require('../server/lib/excel');
+    const run = {
+      featureTitle: 'Menu Items', featureDescription: '', createdAt: new Date().toISOString(), requirements: [],
+      scenarios: [scenario('x', 'Open the menu', [step('1', 'Given', 'a page'), step('2', 'Then', 'it loads')])],
+    };
+    const out = new ExcelJS.Workbook();
+    await out.xlsx.load(await buildWorkbook(run));
+    const cell = out.getWorksheet('Test Cases').getRow(2).getCell(3).value;
+    assert.ok(!cell || cell === '', `expected blank, got "${cell}"`);
   });
 }
 

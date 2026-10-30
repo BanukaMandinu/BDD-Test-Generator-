@@ -15,6 +15,7 @@ const { saveRun } = require('../lib/store');
 const { resolveTypes, publicList } = require('../lib/testTypes');
 const quality = require('../lib/quality');
 const { normalizeExamples, placeholdersInStep } = require('../lib/placeholders');
+const { cleanDescription } = require('../lib/revise');
 const audit = require('../lib/audit');
 const sessionStore = require('../lib/session');
 const signin = require('../lib/signin');
@@ -134,8 +135,11 @@ function buildScenarios(rawScenarios, requirements, validTypeIds) {
     const hasPlaceholders = steps.some((st) => placeholdersInStep(st).length > 0);
     const outline = Boolean(s.isOutline || hasPlaceholders) && Boolean(examples);
 
+    const description = cleanDescription(s.description);
+
     return {
       id: crypto.randomUUID(),
+      ...(description ? { description } : {}),
       title: s.title,
       testType: validTypeIds.has(s.testType) ? s.testType : null,
       included: true,
@@ -349,6 +353,7 @@ router.post('/generate', async (req, res) => {
           return {
             ref: i + 1,
             title: s.title,
+            ...(s.description ? { description: s.description } : {}),
             testType: s.testType,
             isOutline: s.isOutline || false,
             ...(s.examples ? { examples: s.examples } : {}),
@@ -390,6 +395,7 @@ router.post('/generate', async (req, res) => {
           } else if (op.op === 'replace' && target && op.steps?.length) {
             const [rebuilt] = buildScenarios([op], run.requirements, validTypeIds);
             target.title = rebuilt.title || target.title;
+            if (rebuilt.description) target.description = rebuilt.description;
             target.testType = rebuilt.testType ?? target.testType;
             target.steps = rebuilt.steps;
             target.isOutline = rebuilt.isOutline;

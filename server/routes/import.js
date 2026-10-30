@@ -60,9 +60,14 @@ function sanitizeScenario(raw, requirementIdByIndex, validTypeIds) {
 
   const testId = typeof raw?.testId === 'string' && raw.testId.trim() ? raw.testId.trim().slice(0, 40) : null;
 
+  // A spreadsheet row's own Description, kept so the export puts it back in that
+  // row's Description column instead of a repeated feature-level text.
+  const description = typeof raw?.description === 'string' && raw.description.trim() ? raw.description.trim().slice(0, 2000) : null;
+
   return {
     id: crypto.randomUUID(),
     ...(testId ? { testId } : {}),
+    ...(description ? { description } : {}),
     title: String(raw?.title ?? 'Untitled scenario').slice(0, 500),
     testType: validTypeIds.has(raw?.testType) ? raw.testType : null,
     included: raw?.included !== false,

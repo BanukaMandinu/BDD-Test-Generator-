@@ -1,6 +1,6 @@
 {
   "name": "bdd-test-generator-desktop",
-  "version": "1.3.1",
+  "version": "1.3.2",
   "description": "Desktop window wrapper for the BDD Test Generator — runs the existing Express server in-process and shows it in a native window instead of a browser tab.",
   "author": "Banuka Nanayakkara",
   "main": "main.js",

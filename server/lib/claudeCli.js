@@ -12,6 +12,7 @@ const {
   buildRefineUserPrompt,
   buildFillGapsUserPrompt,
   buildUpdateUserPrompt,
+  buildDescribeUserPrompt,
   buildScenarioFromTitlePrompt,
   buildUpdateAllUserPrompt,
 } = require('./prompts');
@@ -536,6 +537,13 @@ async function reviseScenario({ scenario, requirements, review, formattedSteps, 
   return parseJsonLoose(result);
 }
 
+// Writes one test case's Description (its precondition) from its title and steps.
+async function describeScenario({ scenario, featureTitle, featureDescription, requirements, formattedSteps, onProgress }) {
+  const userPrompt = buildDescribeUserPrompt({ scenario, featureTitle, featureDescription, requirements, formattedSteps });
+  const result = await runClaude({ userPrompt, browserTools: [], onProgress });
+  return parseJsonLoose(result);
+}
+
 // A manually-added scenario has only a title — write its steps. Grounded in
 // the real page (read-only browsing, same as a plain-text/URL generate) when
 // the run has a source URL; a plain text-only pass otherwise (a run from a
@@ -586,6 +594,7 @@ module.exports = {
   refineTestPlan,
   fillCoverageGaps,
   reviseScenario,
+  describeScenario,
   generateScenarioFromTitle,
   reviseAllScenarios,
   normalizeDataTable,

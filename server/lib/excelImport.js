@@ -158,6 +158,9 @@ async function parseSheet(base64, sheetName) {
     // The export appends " (outline — N cases)" to the summary; take it off so
     // a round trip doesn't stack the suffix.
     scenario.title = scenario.title.replace(/\s*\(outline\s*[—-]\s*\d+ cases?\)\s*$/i, '');
+    // Each test case keeps its own description; the feature only takes one when
+    // every row shares it (below).
+    if (description) scenario.description = description.slice(0, 2000);
     scenarios.push(scenario);
     if (description) descriptions.add(description);
     for (const w of rowWarnings) if (!warnings.includes(w)) warnings.push(w);

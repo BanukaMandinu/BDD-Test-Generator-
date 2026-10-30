@@ -1346,7 +1346,7 @@
 
   // What a reviewer means by "go through the website and fix the test cases".
   const WEBSITE_CHECK_NOTE =
-    'Go through the website and check every test case against what is really there. Update steps that no longer match, remove test cases for things the site does not have, and add test cases for anything important that is missing.';
+    'Go through the website and check every test case against what is really there. Update steps that no longer match, remove test cases for things the site does not have, and add test cases for anything important that is missing. Write each test case\'s description as its precondition (for example the role the user must be signed in as, and what must already be true).';
 
   // The sign-in checkbox lives in two places (start options and here); keep them
   // as one setting, and say which site a pasted session belongs to.
@@ -1837,6 +1837,13 @@
           ${scenario.testType ? `<span class="type-badge" data-type-id="${escapeHtml(scenario.testType)}">${escapeHtml(typeLabel(scenario.testType))}</span>` : ''}
           <button class="danger-outline delete-scenario" title="Delete scenario">Delete</button>
         </div>
+        <div class="scenario-desc">
+          <div class="scenario-desc-head">
+            <label class="scenario-desc-label">Description <span class="hint">— the precondition for this test case</span></label>
+            <button class="link-btn describe-scenario-btn" title="Let the AI write the precondition from this test case's steps">Write with AI</button>
+          </div>
+          <textarea class="scenario-description-input" rows="2" placeholder="e.g. The user is signed in as an Instructor and has started a course">${escapeHtml(scenario.description || '')}</textarea>
+        </div>
         <div class="scenario-steps">${stepsHtml}</div>
         ${examplesHtml(scenario)}
         <div class="add-step-row">
@@ -2040,6 +2047,26 @@
       return;
     }
 
+    if (e.target.classList.contains('describe-scenario-btn')) {
+      const statusNode = card.querySelector('.scenario-status');
+      const box = card.querySelector('.scenario-description-input');
+      e.target.disabled = true;
+      setStatus(statusNode, 'Writing the description…');
+      try {
+        // Persist the run first so the server sees the steps as they are on screen.
+        await api(`/runs/${currentRun.id}`, { method: 'PUT', body: JSON.stringify(currentRun) });
+        const { description } = await api(`/runs/${currentRun.id}/scenarios/${scenario.id}/describe`, { method: 'POST', body: '{}' });
+        scenario.description = description;
+        box.value = description;
+        setStatus(statusNode, 'Description written.', 'ok');
+      } catch (err) {
+        setStatus(statusNode, err.message, 'error');
+      } finally {
+        e.target.disabled = false;
+      }
+      return;
+    }
+
     if (e.target.classList.contains('update-scenario-btn')) {
       const statusNode = card.querySelector('.scenario-status');
       const review = card.querySelector('.review-input').value.trim();
@@ -2093,6 +2120,12 @@
     }
     if (e.target.classList.contains('review-input')) {
       scenario.review = e.target.value;
+      return;
+    }
+    if (e.target.classList.contains('scenario-description-input')) {
+      // Empty means "no precondition" — drop the field rather than keep a blank string.
+      if (e.target.value.trim()) scenario.description = e.target.value;
+      else delete scenario.description;
       return;
     }
 

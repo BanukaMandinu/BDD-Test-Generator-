@@ -430,6 +430,13 @@ button.big { padding: 11px 24px; font-size: 14.5px; border-radius: 8px; }
 .scenario-top { display: flex; align-items: flex-start; gap: 10px; }
 .scenario-top input[type="checkbox"] { margin-top: 11px; width: 15px; height: 15px; }
 .scenario-title-input { flex: 1; font-weight: 600; font-size: 13.5px; }
+/* The Description is the test case's precondition; it sits under the title, in line with the steps. */
+.scenario-desc { margin: 8px 0 4px 25px; }
+.scenario-desc-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 4px; }
+.scenario-desc-head .link-btn { padding: 2px 10px; font-size: 11px; }
+.scenario-desc-label { display: block; font-size: 11px; font-weight: 600; color: var(--muted); }
+.scenario-desc-label .hint { font-weight: 400; color: var(--faint); }
+.scenario-description-input { min-height: 38px; font-size: 12.5px; }
 
 .type-badge {
   font-size: 9.5px; font-weight: 700; letter-spacing: 0.3px; text-transform: uppercase;

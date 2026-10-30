@@ -42,6 +42,7 @@ router.get('/runs/:id/export.json', (req, res) => {
     requirements: run.requirements,
     scenarios: run.scenarios.map((s) => ({
       title: s.title,
+      description: s.description || null,
       testType: s.testType,
       included: s.included !== false,
       isOutline: Boolean(s.isOutline),

@@ -65,6 +65,11 @@ const STEP_SCHEMA_FRAGMENT = `{
         "dataTable": [ ["header1","header2"], ["cell","cell"] ]   // OPTIONAL, omit entirely for most steps
       }`;
 
+// A test case's Description is its PRECONDITION, not a summary: who the user must
+// be and what must already be true before step 1. The sheet column is read that way.
+const DESCRIPTION_FIELD = `"description": "string — the PRECONDITION: who the user must be and what must already be true before step 1, in one short sentence (e.g. 'The user is signed in as an Instructor and has started a course'). Never a restatement of the title. ALWAYS write one for a new test case: if nothing special is needed, state the starting point (e.g. 'The user is on the home page')."`;
+const KEEP_DESCRIPTION_FIELD = `"description": "string — the current precondition, returned unchanged unless the feedback asks to change it, or it is empty and a precondition is clearly needed"`;
+
 const GENERATE_SCHEMA = `{
   "featureTitle": "string",
   "featureDescription": "string (one line, optional but usually helpful)",
@@ -72,6 +77,7 @@ const GENERATE_SCHEMA = `{
   "scenarios": [
     {
       "title": "string (imperative-verb-first)",
+      ${DESCRIPTION_FIELD},
       "testType": "one of the type ids you were given",
       "page": "the URL this scenario tests, when several pages are in scope; omit otherwise",
       "isOutline": false,                  // true ONLY for a Scenario Outline
@@ -116,6 +122,7 @@ This is the most common failure in generated test suites — actively guard agai
 
 const REVISE_SCHEMA = `{
   "title": "string",
+  ${KEEP_DESCRIPTION_FIELD},
   "isOutline": false,
   "examples": [ ["placeholder name"], ["value"] ],
   "steps": [ ${STEP_SCHEMA_FRAGMENT} ]
@@ -361,6 +368,7 @@ const RECORDINGS_APPEND_SCHEMA = `{
   "scenarios": [
     {
       "title": "string (imperative-verb-first)",
+      ${DESCRIPTION_FIELD},
       "testType": "one of the type ids you were given",
       "isOutline": false,                  // true ONLY for a Scenario Outline
       "examples": [ ["placeholder name"], ["value"] ],  // REQUIRED when isOutline is true; first row = headers matching the <placeholders>
@@ -414,10 +422,10 @@ const REFINE_SCHEMA = `{
   "operations": [
     { "op": "delete",  "ref": 3, "why": "duplicate of ref 1" },
     { "op": "replace", "ref": 5, "why": "step 2 described clicking a button",
-      "title": "string", "testType": "type id", "isOutline": false, "examples": null,
+      "title": "string", ${KEEP_DESCRIPTION_FIELD}, "testType": "type id", "isOutline": false, "examples": null,
       "steps": [ ${STEP_SCHEMA_FRAGMENT} ], "coversRequirements": [0] },
     { "op": "add", "why": "no scenario covered requirement 4",
-      "title": "string", "testType": "type id", "isOutline": false, "examples": null,
+      "title": "string", ${DESCRIPTION_FIELD}, "testType": "type id", "isOutline": false, "examples": null,
       "steps": [ ${STEP_SCHEMA_FRAGMENT} ], "coversRequirements": [4] }
   ]
 }`;
@@ -488,6 +496,7 @@ ${reqLines || '(none recorded)'}
 
 Current scenario:
 Title: ${scenario.title}
+Description (precondition): ${scenario.description || '(none)'}
 Is a Scenario Outline: ${scenario.isOutline ? 'yes' : 'no'}
 ${formattedSteps}${formattedExamples ? `
 Examples:
@@ -504,6 +513,27 @@ Apply the feedback faithfully and leave alone anything the reviewer didn't ask y
 ${REVISE_SCHEMA}`;
 }
 
+// Writes just the Description (precondition) of one existing test case, from its
+// title and steps — for a case built by hand, or an old one that never had one.
+const DESCRIBE_SCHEMA = `{
+  ${DESCRIPTION_FIELD}
+}`;
+
+function buildDescribeUserPrompt({ scenario, featureTitle, featureDescription, requirements, formattedSteps }) {
+  const reqLines = (requirements || []).map((r, i) => `${i + 1}. ${r.text}`).join('\n');
+  return `Write the Description for one test case. In this team's test sheet the Description is the test case's PRECONDITION: who the user must be and what must already be true before step 1 runs. It is not a summary of the test and must not repeat the title.
+
+Feature: ${featureTitle}
+${featureDescription ? `About the feature: ${featureDescription}\n` : ''}${reqLines ? `Known requirements (for context):\n${reqLines}\n` : ''}
+Test case: ${scenario.title}
+${formattedSteps}
+
+Work out the precondition from the steps: the role the user must be signed in as (for example an Instructor or an Admin), the page or state they must start from, and any data that must already exist. Write it as one short sentence, in plain English, in the same wording the steps use for the actor. Do not describe what the test does, and do not invent a role or state the steps give no sign of — if nothing special is needed, say where the user starts.
+
+Respond with ONLY raw JSON matching this schema:
+${DESCRIBE_SCHEMA}`;
+}
+
 // Used when a manually-added scenario has only a title so far — "Generate"
 // writes its steps, grounded in the real page when one is available, rather
 // than the reviewer having to write Given/When/Then by hand. Unlike a plain
@@ -512,6 +542,7 @@ ${REVISE_SCHEMA}`;
 // assigns one.
 const NEW_SCENARIO_SCHEMA = `{
   "title": "string",
+  ${DESCRIPTION_FIELD},
   "testType": "one of the type ids you were given",
   "isOutline": false,
   "examples": [ ["placeholder name"], ["value"] ],
@@ -565,6 +596,7 @@ const UPDATE_ALL_SCHEMA = `{
     {
       "ref": 1,                    // echo back the ref you were given; OMIT this field entirely for a brand-new scenario
       "title": "string",
+      ${KEEP_DESCRIPTION_FIELD},
       "remove": false,             // true ONLY when checking the live site shows this test case covers something that is not there
       "removeReason": "string (required when remove is true: what you looked for and did not find)",
       "steps": [ ${STEP_SCHEMA_FRAGMENT} ]
@@ -585,6 +617,7 @@ Visit the site and follow its main navigation to the areas these test cases are 
 - REMOVE (set "remove": true and give a "removeReason") a scenario only when you looked for the thing it covers and it is clearly not on the site. When unsure, keep it. Never remove a scenario just because you could not reach that part of the site.
 - ADD a scenario (omit "ref") for a meaningful feature you saw on the site that nothing in the suite covers. Do not add generic "page loads" scenarios, and do not duplicate an existing one.
 - If the site asks you to sign in and you cannot get past it, do NOT guess: return every scenario unchanged and say so in "note".
+- Each scenario's "description" is its precondition. When the site shows that a scenario needs a particular role or state (an Instructor account, a started course, a populated list), write that as the description.
 - Anything unticked ([KEEP] steps) still follows the rules below.`;
 }
 
@@ -610,7 +643,7 @@ Additional rules for a whole-feature update:
 - Return EVERY scenario you were given, each echoing back the exact "ref" number it was given. Do not drop or merge scenarios (to propose deleting one, keep it in the list with "remove": true — and only when a live website was checked).
 - Apply the feedback consistently — if it changes how something is phrased, phrase it that way everywhere it appears.
 - Don't introduce duplicate scenarios that check the same thing as an existing one.
-- If the feedback asks for coverage that no existing scenario provides, add a new scenario for it and OMIT the "ref" field on that one so it's recognised as new.
+- If the feedback asks for coverage that no existing scenario provides, add a new scenario for it and OMIT the "ref" field on that one so it's recognised as new. Every new scenario MUST have its "description" written (its precondition).
 - If the feedback simply doesn't apply to a particular scenario, return that scenario unchanged.
 
 ${OUTLINE_REVISION_RULES}
@@ -623,6 +656,7 @@ const FILL_GAPS_SCHEMA = `{
   "scenarios": [
     {
       "title": "string (imperative-verb-first)",
+      ${DESCRIPTION_FIELD},
       "testType": "type id",
       "isOutline": false,                  // true ONLY for a Scenario Outline
       "examples": [ ["placeholder name"], ["value"] ],  // REQUIRED when isOutline is true; first row = headers matching the <placeholders>
@@ -668,6 +702,7 @@ module.exports = {
   buildRefineUserPrompt,
   buildFillGapsUserPrompt,
   buildUpdateUserPrompt,
+  buildDescribeUserPrompt,
   buildScenarioFromTitlePrompt,
   buildUpdateAllUserPrompt,
 };

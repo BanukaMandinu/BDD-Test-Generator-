@@ -36,6 +36,7 @@ function formatScenarioForPrompt(scenario, ref) {
   const parts = [
     `--- Scenario ref ${ref} ---`,
     `Title: ${scenario.title}`,
+    `Description (precondition): ${scenario.description || '(none)'}`,
   ];
   if (scenario.isOutline) parts.push('This is a Scenario Outline.');
   parts.push(formatStepsForPrompt(scenario.steps));
@@ -63,6 +64,22 @@ function applyOutlineFromModel(scenario, returned) {
     // rather than emitting a scenario Cucumber can't run.
     scenario.isOutline = true;
   }
+  return scenario;
+}
+
+// A test case's description is its precondition. Returns the cleaned text, or null
+// when there is none, so callers can leave the field off entirely.
+function cleanDescription(value) {
+  if (typeof value !== 'string') return null;
+  const text = value.trim().slice(0, 2000);
+  return text || null;
+}
+
+// Takes a model reply's description over the current one only when it actually
+// says something — an empty or missing reply never wipes what the reviewer wrote.
+function applyDescriptionFromModel(scenario, returned) {
+  const description = cleanDescription(returned?.description);
+  if (description) scenario.description = description;
   return scenario;
 }
 
@@ -118,8 +135,10 @@ function reconcileSteps(originalSteps, returnedSteps) {
 
 function newScenarioFromModel(returned) {
   const examples = normalizeExamples(returned.examples);
+  const description = cleanDescription(returned.description);
   return {
     id: crypto.randomUUID(),
+    ...(description ? { description } : {}),
     title: returned.title || 'New scenario',
     included: true,
     review: '',
@@ -138,6 +157,8 @@ function newScenarioFromModel(returned) {
 }
 
 module.exports = {
+  cleanDescription,
+  applyDescriptionFromModel,
   isRevisable,
   formatExamplesForPrompt,
   applyOutlineFromModel,
