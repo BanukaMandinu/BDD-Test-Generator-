@@ -906,6 +906,57 @@ group('detectUrl — bare domains, not just full URLs (server/lib/claudeCli.js)'
 });
 
 // ---------------------------------------------------------------------------
+group('session snippet — built for one site', () => {
+  const { buildSnippet, originFromUrl } = require('../server/lib/session');
+
+  test('only the origin of a link is kept, with a scheme added when missing', () => {
+    assert.strictEqual(originFromUrl('my-app.com/login?x=1#top'), 'https://my-app.com');
+    assert.strictEqual(originFromUrl('http://localhost:3000/a'), 'http://localhost:3000');
+  });
+
+  test('anything that is not a plain web link is refused', () => {
+    assert.strictEqual(originFromUrl('javascript:alert(1)'), null);
+    assert.strictEqual(originFromUrl('not a url'), null);
+    assert.strictEqual(originFromUrl(''), null);
+    assert.strictEqual(originFromUrl('nope'), null); // a bare word is a typo, not a site
+  });
+
+  test('the snippet is valid JavaScript and pins the site it was built for', () => {
+    const snippet = buildSnippet('my-app.com/dashboard');
+    assert.doesNotThrow(() => new Function(snippet));
+    assert.match(snippet, /EXPECTED_ORIGIN = "https:\/\/my-app\.com"/);
+    assert.match(snippet, /Wrong tab/);
+  });
+
+  test('a hostile link cannot inject code into the snippet', () => {
+    const snippet = buildSnippet('https://a.com/"+alert(1)+"');
+    assert.doesNotThrow(() => new Function(snippet));
+    assert.ok(!snippet.includes('alert(1)'));
+  });
+
+  test('different links give different snippets', () => {
+    assert.notStrictEqual(buildSnippet('https://one.com'), buildSnippet('https://two.com'));
+  });
+});
+
+group('update all — website check prompt', () => {
+  const { buildUpdateAllUserPrompt } = require('../server/lib/prompts');
+  const base = { featureTitle: 'F', featureDescription: '', requirements: [], formattedScenarios: 'Scenario 1', review: 'tidy up' };
+
+  test('the live-site audit is only requested when the run has a link', () => {
+    assert.ok(!buildUpdateAllUserPrompt(base).includes('LIVE WEBSITE'));
+    const withSite = buildUpdateAllUserPrompt({ ...base, url: 'https://my-app.com' });
+    assert.match(withSite, /CHECKED AGAINST THE LIVE WEBSITE: https:\/\/my-app\.com/);
+    assert.match(withSite, /"remove"/);
+  });
+
+  test('the model is told not to guess when it hits a sign-in wall', () => {
+    const p = buildUpdateAllUserPrompt({ ...base, url: 'https://my-app.com' });
+    assert.match(p, /sign in and you cannot get past it/);
+  });
+});
+
+// ---------------------------------------------------------------------------
 // Spreadsheet import is async (the workbook is parsed off a buffer), so its
 // checks run after the synchronous groups and are awaited before the summary.
 async function asyncTest(name, fn) {

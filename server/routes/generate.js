@@ -17,6 +17,7 @@ const quality = require('../lib/quality');
 const { normalizeExamples, placeholdersInStep } = require('../lib/placeholders');
 const audit = require('../lib/audit');
 const sessionStore = require('../lib/session');
+const signin = require('../lib/signin');
 const { sanitizeRecordings } = require('../lib/recorder');
 
 const router = express.Router();
@@ -64,7 +65,14 @@ router.get('/session', (req, res) => {
 });
 
 // The snippet the user runs in their own Chrome console.
-router.get('/session/snippet', (req, res) => res.json({ snippet: sessionStore.BROWSER_SNIPPET }));
+// With ?url=, the snippet is built for that site (and refuses to run anywhere else).
+router.get('/session/snippet', (req, res) => {
+  const link = typeof req.query.url === 'string' ? req.query.url.trim() : '';
+  if (!link) return res.json({ snippet: sessionStore.BROWSER_SNIPPET, origin: null });
+  const origin = sessionStore.originFromUrl(link);
+  if (!origin) return res.status(400).json({ error: 'That does not look like a web address. Use a full link such as https://my-app.com.' });
+  res.json({ snippet: sessionStore.buildSnippet(origin), origin });
+});
 
 router.post('/session/paste', (req, res) => {
   try {
@@ -77,6 +85,21 @@ router.post('/session/paste', (req, res) => {
     res.status(400).json({ error: err.message });
   }
 });
+
+// Opens a visible browser on the site so the user can sign in themselves.
+router.post('/session/signin', async (req, res) => {
+  const origin = sessionStore.originFromUrl(req.body?.url);
+  if (!origin) return res.status(400).json({ error: 'Enter the site link first, such as https://my-app.com.' });
+  try {
+    const result = await signin.start(String(req.body.url).trim().startsWith('http') ? String(req.body.url).trim() : origin);
+    audit.record('session-signin-open', { detail: origin });
+    res.json({ ...result, origin });
+  } catch (err) {
+    res.status(err.status || 500).json({ error: err.message });
+  }
+});
+
+router.get('/session/signin', (req, res) => res.json(signin.status()));
 
 router.delete('/session', (req, res) => {
   sessionStore.clearStorageState();

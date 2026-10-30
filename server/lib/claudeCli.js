@@ -547,15 +547,30 @@ async function generateScenarioFromTitle({ title, featureTitle, featureDescripti
   return parseJsonLoose(result);
 }
 
-async function reviseAllScenarios({ featureTitle, featureDescription, requirements, formattedScenarios, review, onProgress }) {
+// With a url, the model also browses the live site (read-only) and audits the
+// suite against it — updating, flagging and adding test cases. Without one it is
+// the plain text-only pass it always was.
+async function reviseAllScenarios({ featureTitle, featureDescription, requirements, formattedScenarios, review, url = null, useSession = false, onProgress }) {
   const userPrompt = buildUpdateAllUserPrompt({
     featureTitle,
     featureDescription,
     requirements,
     formattedScenarios,
     review,
+    url,
   });
-  const result = await runClaude({ userPrompt, browserTools: [], onProgress });
+  if (!url) {
+    const result = await runClaude({ userPrompt, browserTools: [], onProgress });
+    return parseJsonLoose(result);
+  }
+  if (onProgress) onProgress(`Exploring ${url}${useSession && hasSavedSession() ? ' with your saved sign-in' : ''}`);
+  const result = await runClaude({
+    userPrompt,
+    browserTools: READONLY_BROWSER_TOOLS,
+    onProgress,
+    useSession,
+    timeoutMs: Math.min(CLI_TIMEOUT_MS * 2, MAX_TIMEOUT_MS),
+  });
   return parseJsonLoose(result);
 }
 

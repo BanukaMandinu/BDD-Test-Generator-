@@ -1,4 +1,4 @@
-const { app, BrowserWindow, dialog, Menu } = require('electron');
+const { app, BrowserWindow, dialog, Menu, shell } = require('electron');
 const path = require('path');
 const fs = require('fs');
 const os = require('os');
@@ -74,6 +74,14 @@ function createWindow() {
     },
   });
   Menu.setApplicationMenu(null);
+
+  // Links to other sites (e.g. "open your site" in the sign-in steps) must open in
+  // the user's real browser — that is where they are signed in — not in this window.
+  win.webContents.setWindowOpenHandler(({ url }) => {
+    if (/^https?:\/\//i.test(url)) shell.openExternal(url);
+    return { action: 'deny' };
+  });
+
   loadWhenReady(win);
 }
 

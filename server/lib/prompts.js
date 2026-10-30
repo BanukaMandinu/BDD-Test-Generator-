@@ -560,16 +560,35 @@ ${NEW_SCENARIO_SCHEMA}`;
 }
 
 const UPDATE_ALL_SCHEMA = `{
+  "note": "string (optional: one sentence for the reviewer, e.g. that the site needed a sign-in you couldn't pass)",
   "scenarios": [
     {
       "ref": 1,                    // echo back the ref you were given; OMIT this field entirely for a brand-new scenario
       "title": "string",
+      "remove": false,             // true ONLY when checking the live site shows this test case covers something that is not there
+      "removeReason": "string (required when remove is true: what you looked for and did not find)",
       "steps": [ ${STEP_SCHEMA_FRAGMENT} ]
     }
   ]
 }`;
 
-function buildUpdateAllUserPrompt({ featureTitle, featureDescription, requirements, formattedScenarios, review }) {
+// Appended when the run has a website to check against. It turns "apply this
+// note" into "audit the suite against the real site", which is what a reviewer
+// means by "go through the website and fix the test cases".
+function buildWebsiteCheckInstructions(url) {
+  return `The reviewer also wants these test cases CHECKED AGAINST THE LIVE WEBSITE: ${url}
+
+${EXPLORE_INSTRUCTIONS}
+
+Visit the site and follow its main navigation to the areas these test cases are about (stay on the same site, read-only — never click anything that changes data). Then audit the whole suite against what you actually saw:
+- UPDATE a scenario whose steps no longer match the real page (a different label, button text, field, order of steps, or message). Use the exact wording you saw.
+- REMOVE (set "remove": true and give a "removeReason") a scenario only when you looked for the thing it covers and it is clearly not on the site. When unsure, keep it. Never remove a scenario just because you could not reach that part of the site.
+- ADD a scenario (omit "ref") for a meaningful feature you saw on the site that nothing in the suite covers. Do not add generic "page loads" scenarios, and do not duplicate an existing one.
+- If the site asks you to sign in and you cannot get past it, do NOT guess: return every scenario unchanged and say so in "note".
+- Anything unticked ([KEEP] steps) still follows the rules below.`;
+}
+
+function buildUpdateAllUserPrompt({ featureTitle, featureDescription, requirements, formattedScenarios, review, url }) {
   const reqLines = requirements.map((r, i) => `${i + 1}. ${r.text}`).join('\n');
   return `A QA reviewer left one piece of feedback that should be applied across a whole feature's test cases at once. Revise every scenario below so the feedback is reflected consistently throughout.
 
@@ -585,10 +604,10 @@ ${formattedScenarios}
 Reviewer feedback to apply across all of them:
 "${review}"
 
-${KEEP_RULES}
+${url ? buildWebsiteCheckInstructions(url) + '\n\n' : ''}${KEEP_RULES}
 
 Additional rules for a whole-feature update:
-- Return EVERY scenario you were given, each echoing back the exact "ref" number it was given. Do not drop or merge scenarios.
+- Return EVERY scenario you were given, each echoing back the exact "ref" number it was given. Do not drop or merge scenarios (to propose deleting one, keep it in the list with "remove": true — and only when a live website was checked).
 - Apply the feedback consistently — if it changes how something is phrased, phrase it that way everywhere it appears.
 - Don't introduce duplicate scenarios that check the same thing as an existing one.
 - If the feedback asks for coverage that no existing scenario provides, add a new scenario for it and OMIT the "ref" field on that one so it's recognised as new.

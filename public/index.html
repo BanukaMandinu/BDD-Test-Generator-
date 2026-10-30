@@ -118,7 +118,7 @@
           </div>
         </details>
 
-        <details class="fold">
+        <details class="fold" id="advancedFold">
           <summary><span class="fold-title">Advanced options</span><span class="fold-meta">review pass, sign-in, interaction</span></summary>
           <div id="optionsPanel" class="fold-body options">
             <label class="toggle-line" for="refineToggle">
@@ -134,25 +134,42 @@
 
           <div id="sessionBorrow" class="sub-card hidden">
             <div class="card-row">
-              <span class="card-title">Borrow your Chrome session</span>
+              <span class="card-title">Sign in to the site</span>
               <button id="sessionClearBtn" class="link-btn hidden">forget</button>
             </div>
-            <ol class="steps">
-              <li>
-                Open the site in Chrome, signed in. Press <kbd>F12</kbd> → Console.
-                <button id="sessionCopyBtn" class="secondary">Copy snippet</button>
-                <span id="sessionCopyStatus" class="status"></span>
-              </li>
-              <li>Paste it in the console, press <kbd>Enter</kbd> — it copies your session.</li>
-              <li>
-                Paste that here:
-                <textarea id="sessionPaste" rows="2" placeholder="Paste the copied session…"></textarea>
-                <div class="actions-row">
-                  <button id="sessionSaveBtn" class="primary">Save session</button>
-                  <span id="sessionSaveStatus" class="status"></span>
-                </div>
-              </li>
-            </ol>
+
+            <label class="field-label" for="sessionUrl">Link of the site to sign in to</label>
+            <input type="text" id="sessionUrl" placeholder="https://your-site.com" autocomplete="off" />
+            <p id="sessionUrlHint" class="micro-note"></p>
+
+            <p class="session-way"><strong>Easiest —</strong> sign in in a browser window</p>
+            <div class="actions-row">
+              <button id="sessionSigninBtn" class="primary" disabled>Open a sign-in window</button>
+              <span id="sessionSigninStatus" class="status keep"></span>
+            </div>
+            <p class="micro-note">A Chrome window opens on your site. Sign in the way you normally do (Google, SSO and MFA all work), then close the window. This works for any kind of site.</p>
+
+            <details class="alt-session">
+              <summary>Or copy the session from the Chrome you already use</summary>
+              <ol class="steps">
+                <li>Open <a id="sessionOpenLink" target="_blank" rel="noopener">your site</a> in Chrome and sign in. Press <kbd>F12</kbd> → <b>Console</b>.</li>
+                <li>Chrome blocks pasting at first. Type <kbd>allow pasting</kbd> and press <kbd>Enter</kbd> (only needed once).</li>
+                <li>
+                  <button id="sessionCopyBtn" class="secondary" disabled>Copy for this site</button>
+                  then paste it into the console (<kbd>Ctrl</kbd>+<kbd>V</kbd>) and press <kbd>Enter</kbd>.
+                  <span id="sessionCopyStatus" class="status"></span>
+                </li>
+                <li>
+                  Paste what it copied here:
+                  <textarea id="sessionPaste" rows="2" placeholder="Paste the copied session…"></textarea>
+                  <div class="actions-row">
+                    <button id="sessionSaveBtn" class="primary">Save session</button>
+                    <span id="sessionSaveStatus" class="status"></span>
+                  </div>
+                </li>
+              </ol>
+              <p class="micro-note">This route can't read HttpOnly cookies, so some sites won't work with it — use the sign-in window for those.</p>
+            </details>
             <ul id="sessionWarnings" class="notice-list hidden"></ul>
           </div>
 
@@ -227,11 +244,30 @@
           <ul id="refineNotesList"></ul>
         </div>
 
-        <details class="card bulk-card">
-          <summary class="card-title">Update every test case at once</summary>
+        <details class="card bulk-card" id="bulkCard">
+          <summary class="card-title">Update all test cases — or check them against your website</summary>
+
+          <div class="site-check">
+            <label class="field-label" for="sourceUrlInput">Website link <span class="muted-text">(optional)</span></label>
+            <input type="text" id="sourceUrlInput" placeholder="https://your-site.com" autocomplete="off" />
+
+            <label class="toggle-line" for="checkWebsiteToggle">
+              <input type="checkbox" id="checkWebsiteToggle" />
+              <span>Go through the website while updating <span class="muted-text">— compares each test case with the real pages, updates what's wrong, flags what isn't there, adds what's missing</span></span>
+            </label>
+            <label class="toggle-line" for="bulkSessionToggle">
+              <input type="checkbox" id="bulkSessionToggle" />
+              <span>Use my saved sign-in <span class="muted-text" id="bulkSessionHint">for pages behind login</span></span>
+            </label>
+            <div class="inline-row">
+              <button id="bulkSessionSetupBtn" class="link-btn" type="button">Set up sign-in →</button>
+              <button id="websitePromptBtn" class="link-btn" type="button">Fill in the “check my website” note</button>
+            </div>
+          </div>
+
           <p class="muted-text">One note, applied to <strong>ticked</strong> cases and steps only.</p>
           <div class="review-row">
-            <textarea id="bulkReviewInput" class="review-input" placeholder="e.g. 'use the exact button labels from the site'"></textarea>
+            <textarea id="bulkReviewInput" class="review-input" placeholder="e.g. 'use the exact button labels from the site' — or leave empty to just check the website"></textarea>
             <button id="updateAllBtn" class="primary">Update all</button>
           </div>
           <span id="bulkReviewStatus" class="status"></span>

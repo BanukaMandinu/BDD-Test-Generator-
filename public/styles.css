@@ -289,6 +289,17 @@ button.big { padding: 11px 24px; font-size: 14.5px; border-radius: 8px; }
   border-radius: 0 0 var(--radius) var(--radius); box-shadow: 0 -6px 14px rgba(20, 24, 40, 0.06);
 }
 
+.session-way { margin: 14px 0 6px; font-size: 12.5px; }
+.alt-session { margin-top: 14px; }
+.alt-session > summary { cursor: pointer; font-size: 12.5px; color: var(--muted); }
+.alt-session > summary:hover { color: var(--primary); }
+.status.keep { white-space: normal; }
+.steps a { color: var(--primary); font-weight: 600; }
+.steps b { color: var(--text); }
+.site-check { margin: 4px 0 14px; padding-bottom: 12px; border-bottom: 1px solid var(--border); }
+.site-check .toggle-line { margin-top: 8px; }
+.site-check .inline-row { margin-top: 10px; }
+
 .import-zone {
   margin-top: 18px; padding: 14px 16px; border: 1.5px dashed var(--border);
   border-radius: var(--radius); background: var(--surface-alt);

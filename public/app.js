@@ -882,22 +882,119 @@
   const sessionWarnings = el('sessionWarnings');
   const sessionClearBtn = el('sessionClearBtn');
 
-  sessionCopyBtn.addEventListener('click', async () => {
+  const sessionUrl = el('sessionUrl');
+  const sessionUrlHint = el('sessionUrlHint');
+  const sessionSigninBtn = el('sessionSigninBtn');
+  const sessionSigninStatus = el('sessionSigninStatus');
+  const sessionOpenLink = el('sessionOpenLink');
+  let sessionUrlTouched = false;
+
+  // A usable http(s) site link, normalised; null for anything else. Unlike the
+  // generate box this also accepts localhost and staging hosts, since people
+  // test those too.
+  function parseSiteLink(raw) {
+    const text = String(raw ?? '').trim();
+    if (!text || /\s/.test(text)) return null;
     try {
-      const { snippet } = await api('/session/snippet');
-      await navigator.clipboard.writeText(snippet);
-      setStatus(sessionCopyStatus, 'Copied — paste it into the Chrome console.', 'ok');
-    } catch (err) {
-      // Clipboard access can be refused (insecure context, permissions). Fall
-      // back to showing the snippet so the step is never a dead end.
+      const u = new URL(/^https?:\/\//i.test(text) ? text : `https://${text}`);
+      if (!/^https?:$/.test(u.protocol)) return null;
+      if (!u.hostname.includes('.') && u.hostname !== 'localhost') return null;
+      return u.href;
+    } catch {
+      return null;
+    }
+  }
+  const originOfLink = (link) => { try { return new URL(link).origin; } catch { return null; } };
+
+  // Everything in the sign-in steps depends on the link: the button text, the
+  // "open your site" link, and the snippet itself (built per site on the server).
+  function refreshSessionLink() {
+    const target = parseSiteLink(sessionUrl.value);
+    sessionCopyBtn.disabled = !target;
+    sessionSigninBtn.disabled = !target;
+    if (target) {
+      sessionOpenLink.href = target;
+      sessionOpenLink.textContent = originOfLink(target);
+      sessionUrlHint.textContent = `Everything below is for ${originOfLink(target)}.`;
+    } else {
+      sessionOpenLink.removeAttribute('href');
+      sessionOpenLink.textContent = 'your site';
+      sessionUrlHint.textContent = sessionUrl.value.trim()
+        ? "That doesn't look like a web address yet."
+        : 'Enter the link of the site you want signed in.';
+    }
+  }
+
+  // Pre-fill from whatever link the user has already given, until they type here.
+  function suggestSessionUrl() {
+    if (sessionUrlTouched) return;
+    sessionUrl.value = extractUrl(inputText.value) || currentRun?.sourceUrl || '';
+    refreshSessionLink();
+  }
+
+  sessionUrl.addEventListener('input', () => { sessionUrlTouched = true; refreshSessionLink(); });
+  inputText.addEventListener('input', suggestSessionUrl);
+
+  sessionCopyBtn.addEventListener('click', async () => {
+    const target = parseSiteLink(sessionUrl.value);
+    if (!target) return;
+    try {
+      const { snippet, origin } = await api(`/session/snippet?url=${encodeURIComponent(target)}`);
+      let copied = false;
       try {
-        const { snippet } = await api('/session/snippet');
+        await navigator.clipboard.writeText(snippet);
+        copied = true;
+      } catch {
+        // Clipboard API refused (focus/permissions) — try the older route via the box.
         sessionPaste.value = snippet;
         sessionPaste.select();
-        setStatus(sessionCopyStatus, 'Could not reach the clipboard — copy it from the box below, then clear it and paste your session back.', 'error');
-      } catch (inner) {
-        setStatus(sessionCopyStatus, inner.message, 'error');
+        copied = document.execCommand('copy');
       }
+      if (copied) {
+        if (sessionPaste.value === snippet) sessionPaste.value = '';
+        setStatus(sessionCopyStatus, `Copied for ${origin}. Paste it into the Chrome console.`, 'ok');
+      } else {
+        setStatus(sessionCopyStatus, 'Could not reach the clipboard — the snippet is in the box below: copy it from there, paste it in the console, then clear the box.', 'error');
+      }
+    } catch (err) {
+      setStatus(sessionCopyStatus, err.message, 'error');
+    }
+  });
+
+  // The sign-in window: the user signs in in a real browser and closes it. Polled
+  // because the window outlives the request that opened it.
+  function pollSignin() {
+    const timer = setInterval(async () => {
+      try {
+        const state = await api('/session/signin');
+        if (state.open) return;
+        clearInterval(timer);
+        sessionToggle.checked = true;
+        await loadSessionState();
+        sessionSigninStatus.textContent = 'Window closed — your sign-in is saved and switched on.';
+        sessionSigninStatus.className = 'status keep ok';
+        refreshSessionLink();
+      } catch {
+        clearInterval(timer);
+        refreshSessionLink();
+      }
+    }, 2000);
+  }
+
+  sessionSigninBtn.addEventListener('click', async () => {
+    const target = parseSiteLink(sessionUrl.value);
+    if (!target) return;
+    sessionSigninBtn.disabled = true;
+    sessionSigninStatus.className = 'status keep';
+    sessionSigninStatus.textContent = 'Opening a browser window…';
+    try {
+      const result = await api('/session/signin', { method: 'POST', body: JSON.stringify({ url: target }) });
+      sessionSigninStatus.textContent = `Sign in in the ${result.browser} window, then close it.`;
+      pollSignin();
+    } catch (err) {
+      sessionSigninStatus.className = 'status keep error';
+      sessionSigninStatus.textContent = err.message;
+      refreshSessionLink();
     }
   });
 
@@ -920,6 +1017,10 @@
 
       sessionPaste.value = '';
       sessionToggle.checked = true; // saving one is a clear signal they want to use it
+      const wanted = originOfLink(parseSiteLink(sessionUrl.value) || '');
+      if (wanted && result.origin && result.origin !== wanted) {
+        result.warnings = [`This session was captured on ${result.origin}, but the link above is ${wanted}. It will only work for ${result.origin}.`, ...(result.warnings || [])];
+      }
       setStatus(
         sessionSaveStatus,
         `Saved ${result.cookieCount} cookie${result.cookieCount === 1 ? '' : 's'} and ${result.localStorageCount} stored value${result.localStorageCount === 1 ? '' : 's'}.`,
@@ -964,6 +1065,8 @@
       }
 
       sessionHint.classList.toggle('session-ready', available);
+      savedSession = { available, origin: pasted?.origin || null };
+      syncBulkSession();
       sessionClearBtn.classList.toggle('hidden', !pasted?.available);
     } catch {
       // Non-fatal: the checkbox still works, the hint just stays generic.
@@ -1157,6 +1260,62 @@
     inputText.focus();
   });
 
+  // ---------- Update all: website link + live check ----------
+  const bulkCard = el('bulkCard');
+  const sourceUrlInput = el('sourceUrlInput');
+  const checkWebsiteToggle = el('checkWebsiteToggle');
+  const bulkSessionToggle = el('bulkSessionToggle');
+  const bulkSessionHint = el('bulkSessionHint');
+  const bulkSessionSetupBtn = el('bulkSessionSetupBtn');
+  const websitePromptBtn = el('websitePromptBtn');
+  let savedSession = { available: false, origin: null };
+
+  // What a reviewer means by "go through the website and fix the test cases".
+  const WEBSITE_CHECK_NOTE =
+    'Go through the website and check every test case against what is really there. Update steps that no longer match, remove test cases for things the site does not have, and add test cases for anything important that is missing.';
+
+  // The sign-in checkbox lives in two places (start options and here); keep them
+  // as one setting, and say which site a pasted session belongs to.
+  function syncBulkSession() {
+    bulkSessionToggle.checked = sessionToggle.checked;
+    const linkOrigin = currentRun?.sourceUrl ? originOfLink(parseSiteLink(currentRun.sourceUrl) || '') : null;
+    if (savedSession.origin && linkOrigin && savedSession.origin !== linkOrigin) {
+      bulkSessionHint.textContent = `— saved for ${savedSession.origin}, not ${linkOrigin}`;
+    } else if (savedSession.available) {
+      bulkSessionHint.textContent = savedSession.origin ? `— saved from ${savedSession.origin}` : '— saved sign-in found';
+    } else {
+      bulkSessionHint.textContent = '— none saved yet';
+    }
+  }
+  bulkSessionToggle.addEventListener('change', () => { sessionToggle.checked = bulkSessionToggle.checked; });
+  sessionToggle.addEventListener('change', syncBulkSession);
+
+  sourceUrlInput.addEventListener('input', () => {
+    if (!currentRun) return;
+    const value = sourceUrlInput.value.trim();
+    currentRun.sourceUrl = value || null;
+    sourceUrlNote.textContent = value ? `Source: ${value}` : '';
+    if (value) checkWebsiteToggle.checked = true;
+    syncBulkSession();
+  });
+
+  websitePromptBtn.addEventListener('click', () => {
+    bulkReviewInput.value = WEBSITE_CHECK_NOTE;
+    if (currentRun?.sourceUrl) checkWebsiteToggle.checked = true;
+    bulkReviewInput.focus();
+  });
+
+  // Reopens the start options at the sign-in steps, pre-filled with this run's link.
+  bulkSessionSetupBtn.addEventListener('click', () => {
+    setStartCollapsed(false);
+    el('advancedFold').open = true;
+    sessionBorrow.classList.remove('hidden');
+    sessionSetupToggle.textContent = 'Hide';
+    if (currentRun?.sourceUrl && !sessionUrlTouched) sessionUrl.value = currentRun.sourceUrl;
+    refreshSessionLink();
+    sessionBorrow.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  });
+
   async function loadRunList(selectId) {
     const runs = await api('/runs');
     runSelect.innerHTML = '<option value="">— new —</option>' +
@@ -1326,7 +1485,13 @@
 
   // ---------- Universal update (whole feature, ticked items only) ----------
   updateAllBtn.addEventListener('click', async () => {
-    const review = bulkReviewInput.value.trim();
+    const checkWebsite = checkWebsiteToggle.checked;
+    if (checkWebsite && !parseSiteLink(currentRun.sourceUrl)) {
+      setStatus(bulkReviewStatus, 'Add the website link first (or untick "Go through the website").', 'error');
+      return;
+    }
+    // With the website check on, an empty note simply means "check the website".
+    const review = bulkReviewInput.value.trim() || (checkWebsite ? WEBSITE_CHECK_NOTE : '');
     if (!review) {
       setStatus(bulkReviewStatus, 'Write what you want changed across the test cases first.', 'error');
       return;
@@ -1349,7 +1514,7 @@
       const res = await fetch(`/api/runs/${currentRun.id}/update-all`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ review }),
+        body: JSON.stringify({ review, checkWebsite, useSession: checkWebsite && bulkSessionToggle.checked }),
       });
 
       await consumeSse(res, {
@@ -1382,6 +1547,8 @@
     if (currentRun && currentRun.id !== collapsedForRunId) {
       collapsedForRunId = currentRun.id;
       setStartCollapsed(true);
+      // An imported sheet has no website yet — put the link field in front of the user.
+      bulkCard.open = Boolean(currentRun.importedFrom) && !currentRun.sourceUrl;
     }
     renderFeatureHeader();
     renderQuality();
@@ -1396,6 +1563,10 @@
     featureTitleInput.value = currentRun.featureTitle;
     featureDescriptionInput.value = currentRun.featureDescription || '';
     sourceUrlNote.textContent = currentRun.sourceUrl ? `Source: ${currentRun.sourceUrl}` : '';
+    sourceUrlInput.value = currentRun.sourceUrl || '';
+    checkWebsiteToggle.checked = Boolean(currentRun.sourceUrl);
+    syncBulkSession();
+    suggestSessionUrl();
   }
   featureTitleInput.addEventListener('input', () => { if (currentRun) currentRun.featureTitle = featureTitleInput.value; });
   featureDescriptionInput.addEventListener('input', () => { if (currentRun) currentRun.featureDescription = featureDescriptionInput.value; });
@@ -2078,6 +2249,7 @@
   sessionSetupToggle.addEventListener('click', () => {
     const hidden = sessionBorrow.classList.toggle('hidden');
     sessionSetupToggle.textContent = hidden ? 'Set one up →' : 'Hide';
+    if (!hidden) suggestSessionUrl();
   });
 
   function updateCredentialFieldsVisibility() {
@@ -2088,6 +2260,7 @@
 
   // ---------- Init ----------
   updateUrlGate();
+  refreshSessionLink();
   loadTestTypes().then(loadRunList).then(loadSessionState).catch((err) =>
     setStatus(generateStatus, `Could not start up: ${err.message}`, 'error')
   );

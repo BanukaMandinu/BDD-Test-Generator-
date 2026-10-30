@@ -45,6 +45,7 @@ server/            Express backend (API + static file serving)
     featureParser.js  Parses a .feature file back in (import), incl. outlines and tables
     excel.js          Workbook builder (Summary / Test Cases / Traceability)
     excelImport.js    Reads an uploaded .xlsx back in: lists its sheets, parses the chosen one
+    signin.js         "Open a sign-in window": a visible browser the user signs in to, saved as a profile
     store.js          Saves/loads each generation run as a JSON file in data/runs
     session.js        Borrowing a signed-in session from your own browser: the
                        console snippet, and conversion to a Playwright storageState
@@ -248,6 +249,18 @@ Drop a `.xlsx` workbook onto the import box (or click **Import…**). If it has 
 - The sheet name becomes the feature title. It becomes a new run; your workbook is never modified — export produces a new file.
 - Cells are read as text only (formulas are never evaluated); 2 MB and 2,000-row caps apply.
 
+### Checking a suite against your website
+
+An imported sheet (or any run) can be audited against the real site. Open **Update all test cases — or check them against your website**, enter the **Website link**, and tick **Go through the website while updating**. Leave the note empty (or click **Fill in the “check my website” note**) and click **Update all**.
+
+The app opens the site read-only in a headless browser, follows its main navigation, and then:
+
+- **updates** test cases whose steps no longer match the real labels, buttons, fields or messages;
+- **flags** test cases for things it looked for and could not find — they are **unticked**, with the reason shown on the card ("Suggested removal — …"), never deleted. Re-tick one to keep it, or use **History** to compare;
+- **adds** test cases for meaningful features it saw that nothing covers.
+
+If the site needs a sign-in the app can't pass, it changes nothing and says so. Tick **Use my saved sign-in** for sites behind a login (see [Pages behind a login](#pages-behind-a-login)). Unticked test cases are left alone, as with any update.
+
 A `.feature` file carries no requirements list, so the **Coverage** tab starts empty when you import one (the app tells you). Test types are recovered from `@tags`, so a file this app produced keeps them. That's why the JSON share file is the better handoff.
 
 Imports are treated as untrusted input: 2 MB cap, bounded scenario/step/row counts, fresh ids assigned throughout, and `Background:` / `Rule:` blocks are flattened rather than dropped — with a note telling you what changed.
@@ -258,13 +271,21 @@ If you paste a URL that needs signing in — including **Google / SSO** — the 
 
 So the agent never signs in. There are two ways to hand it a session you already have.
 
-#### Option A — borrow the session from your own Chrome (recommended)
+#### Easiest — sign in in a browser window
+
+Under **Advanced options → Set one up**, enter the **link of the site**, then click **Open a sign-in window**. A Chrome window opens on that site; sign in the way you normally do (Google, SSO and MFA all work), then **close the window**. The sign-in is saved and switched on. Unlike the options below, this also captures HttpOnly cookies, so it works for server-rendered apps too.
+
+Credentials are typed only into that window — never seen by this app or the model. Closing the window after signing in replaces any session you had pasted before.
+
+#### Option A — borrow the session from your own Chrome
 
 No second sign-in at all: you're already logged in somewhere, so lend it that. Under **Options → Borrow your Chrome session**:
 
-1. Open the site in Chrome, signed in. Press <kbd>F12</kbd> → **Console**.
-2. Click **Copy the snippet** in the app, paste it into the console, press Enter. It copies your session to the clipboard.
-3. Paste that back into the app and click **Save session**.
+1. Enter the site's link in the app. The steps below, the "open your site" link and the snippet are all built for that site.
+2. Open the site in Chrome, signed in. Press <kbd>F12</kbd> → **Console**.
+3. **Chrome blocks pasting at first:** type `allow pasting` and press Enter (once). Without this, nothing you paste runs.
+4. Click **Copy for this site**, paste it into the console (<kbd>Ctrl</kbd>+<kbd>V</kbd>), press Enter. It copies your session to the clipboard. If it says *Wrong tab*, you ran it on a different site than the link — open the right one first.
+5. Paste that back into the app and click **Save session**.
 
 The snippet only *reads* — it collects cookies and localStorage for that one origin and copies them out. Your password is never typed anywhere but your own browser, and nothing is sent to the model.
 

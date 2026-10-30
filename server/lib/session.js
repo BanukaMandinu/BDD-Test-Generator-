@@ -42,9 +42,40 @@ function hasAnySession() {
   return sessionKind() !== 'none';
 }
 
+// Only plain http(s) links are accepted, and only the ORIGIN is kept: it is what
+// ends up inside the snippet, so nothing the user typed is ever pasted into code
+// that runs in their browser.
+function originFromUrl(raw) {
+  try {
+    const text = String(raw).trim();
+    const url = new URL(/^[a-z][a-z0-9+.-]*:\/\//i.test(text) ? text : `https://${text}`);
+    if (url.protocol !== 'http:' && url.protocol !== 'https:') return null;
+    // A real host: dotted ("my-app.com"), localhost, or an IP. A bare word such as
+    // "nope" parses as a URL but is a typo, and would send a browser off to nothing.
+    const host = url.hostname;
+    if (!host.includes('.') && host !== 'localhost' && !host.includes(':')) return null;
+    return url.origin;
+  } catch {
+    return null;
+  }
+}
+
 // Runs in the user's own DevTools console. `copy()` is a DevTools helper, so the
 // result lands on the clipboard ready to paste straight back into the app.
-const BROWSER_SNIPPET = `(() => {
+//
+// Built per link: the snippet knows which site it is for, and refuses to run on
+// any other tab — the most common way this goes wrong is running it on a Google
+// or login tab and capturing nothing useful.
+function buildSnippet(link) {
+  const expected = link ? originFromUrl(link) : null;
+  // Normalised so the copied text is the same whatever line endings this file has.
+  return normalizeNewlines(`(() => {
+  const EXPECTED_ORIGIN = ${JSON.stringify(expected)};
+  if (EXPECTED_ORIGIN && location.origin !== EXPECTED_ORIGIN) {
+    console.error('Wrong tab: this is ' + location.origin + ' but the session is for ' + EXPECTED_ORIGIN + '. Open ' + EXPECTED_ORIGIN + ', sign in, then run this again on that tab.');
+    return;
+  }
+
   const readAll = (store) => {
     const out = [];
     try {
@@ -87,8 +118,15 @@ const BROWSER_SNIPPET = `(() => {
   if (!cookies.length && !payload.localStorage.length && !payload.sessionStorage.length) {
     console.warn('Nothing was captured. Make sure you are signed in and on the app itself, not a login redirect.');
   }
-  return payload;
-})()`;
+  return 'Done - now paste into the test generator.';
+})()`);
+}
+
+function normalizeNewlines(text) {
+  return text.split('\r\n').join('\n').split('\r').join('\n');
+}
+
+const BROWSER_SNIPPET = buildSnippet(null);
 
 function ensureDataDir() {
   fs.mkdirSync(DATA_DIR, { recursive: true });
@@ -214,6 +252,8 @@ function describe() {
 
 module.exports = {
   BROWSER_SNIPPET,
+  buildSnippet,
+  originFromUrl,
   STORAGE_STATE_PATH,
   PROFILE_DIR,
   hasStorageState,

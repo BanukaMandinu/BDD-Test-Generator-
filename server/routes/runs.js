@@ -22,6 +22,7 @@ const {
   applyOutlineFromModel,
 } = require('../lib/revise');
 const audit = require('../lib/audit');
+const { originFromUrl } = require('../lib/session');
 const quality = require('../lib/quality');
 const versions = require('../lib/versions');
 
@@ -69,6 +70,21 @@ router.put('/runs/:id', (req, res, next) => {
       createdAt: existing.createdAt,
       input: existing.input,
     };
+
+    // The link is what lets "Update all" check the suite against the real site,
+    // so it is editable (an imported sheet arrives without one). Only a plain
+    // http(s) link is kept; an empty value clears it.
+    if ('sourceUrl' in incoming) {
+      const raw = String(incoming.sourceUrl ?? '').trim();
+      if (!raw) {
+        updated.sourceUrl = null;
+      } else {
+        if (!originFromUrl(raw)) {
+          return res.status(400).json({ error: 'That website link is not valid. Use a full address such as https://my-app.com.' });
+        }
+        updated.sourceUrl = (/^https?:\/\//i.test(raw) ? raw : `https://${raw}`).slice(0, 2000);
+      }
+    }
 
     versions.snapshot(existing, 'manual edit');
 
@@ -448,6 +464,7 @@ router.post('/runs/:id/update-all', async (req, res) => {
 
     // ref is the scenario's 1-based position in the batch we send; the model
     // echoes it back so we can map each revision to the right scenario.
+    const checkWebsite = req.body?.checkWebsite === true && Boolean(run.sourceUrl);
     const refToScenario = new Map();
     const formattedScenarios = targets
       .map((scenario, i) => {
@@ -464,10 +481,15 @@ router.post('/runs/:id/update-all', async (req, res) => {
       requirements: run.requirements,
       formattedScenarios,
       review,
+      url: checkWebsite ? run.sourceUrl : null,
+      useSession: checkWebsite && req.body?.useSession === true,
       onProgress: (message) => send('progress', { message }),
     });
 
+    if (revised.note) send('progress', { message: String(revised.note).slice(0, 300) });
+
     let updatedCount = 0;
+    let flaggedCount = 0;
     const added = [];
 
     for (const returned of revised.scenarios || []) {
@@ -480,6 +502,14 @@ router.post('/runs/:id/update-all', async (req, res) => {
         applyOutlineFromModel(scenario, returned);
         scenario.review = '';
         scenario.lastReviewApplied = review;
+        // Removal is only ever a proposal, and only when a live site was checked:
+        // the case is unticked (so it drops out of export and further reviews) but
+        // stays on screen with the reason, and History can restore it.
+        if (checkWebsite && returned.remove === true) {
+          scenario.included = false;
+          scenario.lastReviewApplied = `Suggested removal — ${String(returned.removeReason || 'not found on the website').slice(0, 300)}`;
+          flaggedCount++;
+        }
         updatedCount++;
       } else if (returned.steps?.length) {
         added.push(newScenarioFromModel(returned));
@@ -496,11 +526,11 @@ router.post('/runs/:id/update-all', async (req, res) => {
     saveRun(run);
     audit.record('update-all', {
       runId: run.id,
-      detail: `${updatedCount} revised, ${added.length} added`,
+      detail: `${updatedCount} revised, ${added.length} added${flaggedCount ? `, ${flaggedCount} flagged for removal` : ''}${checkWebsite ? ' (checked against website)' : ''}`,
     });
 
     send('progress', {
-      message: `Revised ${updatedCount} test case${updatedCount === 1 ? '' : 's'}${added.length ? `, added ${added.length} new one${added.length === 1 ? '' : 's'}` : ''}`,
+      message: `Revised ${updatedCount} test case${updatedCount === 1 ? '' : 's'}${added.length ? `, added ${added.length} new one${added.length === 1 ? '' : 's'}` : ''}${flaggedCount ? `, unticked ${flaggedCount} that the website doesn't seem to have` : ''}`,
     });
     send('done', run);
   } catch (err) {
