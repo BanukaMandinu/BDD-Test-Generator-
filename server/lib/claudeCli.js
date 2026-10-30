@@ -530,8 +530,8 @@ async function fillCoverageGaps({ featureTitle, gaps, existingTitles, types, onP
   return parseJsonLoose(result);
 }
 
-async function reviseScenario({ scenario, requirements, review, formattedSteps, onProgress }) {
-  const userPrompt = buildUpdateUserPrompt({ scenario, requirements, review, formattedSteps });
+async function reviseScenario({ scenario, requirements, review, formattedSteps, formattedExamples, onProgress }) {
+  const userPrompt = buildUpdateUserPrompt({ scenario, requirements, review, formattedSteps, formattedExamples });
   const result = await runClaude({ userPrompt, browserTools: [], onProgress });
   return parseJsonLoose(result);
 }

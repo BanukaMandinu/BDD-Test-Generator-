@@ -227,9 +227,16 @@
         <div id="qualityPanel" class="card status-card hidden">
           <div class="card-row">
             <span id="qualityTitle" class="card-title"></span>
-            <button id="qualityToggle" class="link-btn">show</button>
+            <span class="card-actions">
+              <button id="qualityFixBtn" class="fix-btn primary-fix hidden" title="Repair what can be repaired, and rewrite the rest one test case at a time">Fix issues</button>
+              <button id="qualityToggle" class="link-btn">show</button>
+            </span>
           </div>
           <ul id="qualityIssues" class="notice-list hidden"></ul>
+          <div id="fixLog" class="terminal hidden">
+            <div class="terminal-head">Fixing issues</div>
+            <ul id="fixItems"></ul>
+          </div>
         </div>
 
         <div class="history-bar">

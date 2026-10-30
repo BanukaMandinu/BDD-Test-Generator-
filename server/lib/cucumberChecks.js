@@ -178,31 +178,57 @@ function checkStepSmells(scenarios) {
 }
 
 // ---- Voice consistency across the whole suite ----
+// Voice problems are suite-wide, but each one is fixed one test case at a time, so
+// the issue carries the cases that break the majority convention (scenarioIds) and
+// the convention itself (instruction) for whoever rewrites them.
+const FIRST_PERSON_RE = /^i\s|\bi am\b|\bmy\b/i;
+const THIRD_PERSON_RE = /\bthe (user|customer|visitor|shopper|member|client|guest|buyer)\b|\bthey\b/i;
+const actorRe = (actor) => new RegExp(`\\b${actor}s?\\b`, 'i');
+
 function checkVoice(scenarios) {
   const issues = [];
-  const liveSteps = scenarios
+  const live = scenarios
     .filter((s) => s.included !== false)
-    .flatMap((s) => (s.steps || []).filter((st) => st.included !== false));
+    .map((scenario) => ({
+      scenario,
+      steps: (scenario.steps || []).filter((st) => st.included !== false),
+    }));
+  const liveSteps = live.flatMap((l) => l.steps);
 
   if (liveSteps.length < 3) return issues;
 
   const allText = liveSteps.map((s) => s.text.toLowerCase()).join(' ');
 
   const actorsUsed = GENERIC_ACTORS.filter((a) => new RegExp(`\\b${a}s?\\b`).test(allText));
+  // Most-used noun wins, so the rewrite touches as few steps as possible.
+  const actorCounts = actorsUsed.map((a) => liveSteps.filter((s) => actorRe(a).test(s.text)).length);
+  const dominantActor = actorsUsed.length ? actorsUsed[actorCounts.indexOf(Math.max(...actorCounts))] : 'user';
+
   if (actorsUsed.length > 1) {
+    const others = actorsUsed.filter((a) => a !== dominantActor);
     issues.push({
       kind: 'cucumber',
       severity: 'warning',
+      scenarioIds: live
+        .filter((l) => l.steps.some((st) => others.some((a) => actorRe(a).test(st.text))))
+        .map((l) => l.scenario.id),
+      instruction: `Refer to the actor as "${dominantActor}" everywhere — replace ${others.map((a) => `"${a}"`).join(', ')} with "${dominantActor}".`,
       message: `The suite mixes ${actorsUsed.map((a) => `"${a}"`).join(', ')} for the same actor. Pick one and use it everywhere — inconsistent nouns fragment step definitions.`,
     });
   }
 
-  const firstPerson = liveSteps.filter((s) => /^i\s|\bi am\b|\bmy\b/i.test(s.text)).length;
-  const thirdPerson = liveSteps.filter((s) => /\bthe (user|customer|visitor|shopper|member|client|guest|buyer)\b|\bthey\b/i.test(s.text)).length;
+  const firstPerson = liveSteps.filter((s) => FIRST_PERSON_RE.test(s.text)).length;
+  const thirdPerson = liveSteps.filter((s) => THIRD_PERSON_RE.test(s.text)).length;
   if (firstPerson && thirdPerson) {
+    const firstWins = firstPerson >= thirdPerson;
+    const minority = firstWins ? THIRD_PERSON_RE : FIRST_PERSON_RE;
     issues.push({
       kind: 'cucumber',
       severity: 'warning',
+      scenarioIds: live.filter((l) => l.steps.some((st) => minority.test(st.text))).map((l) => l.scenario.id),
+      instruction: firstWins
+        ? 'Write every step in the first person ("I …") — the rest of the suite does.'
+        : `Write every step in the third person ("the ${dominantActor} …") — the rest of the suite does.`,
       message: `The suite mixes first person ("I …", ${firstPerson} step${firstPerson === 1 ? '' : 's'}) with third person (${thirdPerson}). Cucumber suites should commit to one voice.`,
     });
   }
@@ -233,10 +259,11 @@ function checkStepReuse(scenarios) {
     for (const { step, role } of effectiveRoles((scenario.steps || []).filter((s) => s.included !== false))) {
       const key = `${role || 'Given'}|${normalizeStep(step.text)}`;
       if (!byNormalized.has(key)) {
-        byNormalized.set(key, { role, normalized: normalizeStep(step.text), examples: [], count: 0 });
+        byNormalized.set(key, { role, normalized: normalizeStep(step.text), examples: [], count: 0, scenarioIds: new Set() });
       }
       const entry = byNormalized.get(key);
       entry.count++;
+      entry.scenarioIds.add(scenario.id);
       if (entry.examples.length < 2) entry.examples.push(step.text);
     }
   }
@@ -258,9 +285,13 @@ function checkStepReuse(scenarios) {
   }
 
   for (const [a, b, score] of flaggedPairs.slice(0, 6)) {
+    // The wording used more often is the one to keep; the other gets unified to it.
+    const [keep, variant] = b.count > a.count ? [b, a] : [a, b];
     issues.push({
       kind: 'reuse',
       severity: 'info',
+      scenarioIds: [...variant.scenarioIds],
+      instruction: `The steps "${variant.examples[0]}" and "${keep.examples[0]}" are worded almost the same. If they mean the same thing, reword the first to use exactly the second's wording (keep any quoted values). If they differ in meaning, leave both alone.`,
       message: `Two steps are worded ${Math.round(score * 100)}% the same, so Cucumber needs a separate step definition for each. If they mean the same thing, use one wording: "${a.examples[0]}" / "${b.examples[0]}".`,
     });
   }

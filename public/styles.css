@@ -539,6 +539,20 @@ kbd {
 .notice-list li.duplicate::before { content: '⧉'; }
 .notice-list li.outline::before { content: '❮❯'; font-size: 9px; }
 .notice-list li.severity-error { color: var(--danger-text); font-weight: 500; }
+
+/* Quality panel: a Fix button per issue, one for the whole list, and the log of
+   what it did to each test case. */
+.card-actions { display: inline-flex; align-items: center; gap: 8px; }
+.notice-list li.fixable { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
+.fix-btn {
+  flex-shrink: 0; padding: 3px 11px; font-size: 11.5px; font-weight: 600;
+  background: var(--surface); border: 1px solid var(--primary); color: var(--primary);
+}
+.fix-btn:hover { background: var(--primary-tint); }
+.fix-btn.primary-fix { padding: 5px 14px; font-size: 12px; background: var(--primary); color: #fff; }
+.fix-btn.primary-fix:hover { background: var(--primary-hover); }
+.fix-btn.hidden { display: none; }
+#fixLog ul { max-height: 260px; }
 .notice-list li.severity-error::before { color: var(--danger); }
 
 .quality-metrics { display: flex; gap: 14px; flex-wrap: wrap; margin-top: 8px; padding-top: 8px; border-top: 1px solid var(--border); font-size: 11px; color: var(--muted); }

@@ -49,6 +49,9 @@
   const qualityTitle = el('qualityTitle');
   const qualityToggle = el('qualityToggle');
   const qualityIssues = el('qualityIssues');
+  const qualityFixBtn = el('qualityFixBtn');
+  const fixLog = el('fixLog');
+  const fixItems = el('fixItems');
   const refineNotes = el('refineNotes');
   const refineNotesList = el('refineNotesList');
 
@@ -1110,6 +1113,7 @@
 
     if (!issues.length) {
       qualityPanel.classList.add('clean');
+      qualityFixBtn.classList.add('hidden');
       qualityTitle.textContent = 'Quality check: nothing flagged';
       const m = metricsHtml(report.metrics);
       qualityIssues.innerHTML = m;
@@ -1135,14 +1139,84 @@
     const sorted = [...issues].sort(
       (a, b) => ISSUE_ORDER.indexOf(a.kind) - ISSUE_ORDER.indexOf(b.kind)
     );
+    // Fixable = it names the test cases it is about. Uncovered requirements and
+    // missing test types need new cases written, which a Fix button can't do.
+    const isFixable = (i) => FIXABLE_KINDS.includes(i.kind) && Array.isArray(i.scenarioIds) && i.scenarioIds.length > 0;
+    qualityFixBtn.classList.toggle('hidden', !sorted.some(isFixable));
+
     qualityIssues.innerHTML = sorted
-      .map((i) => `<li class="${i.kind}${i.severity === 'error' ? ' severity-error' : ''}">${escapeHtml(i.message)}</li>`)
+      .map((i) => {
+        const classes = `${i.kind}${i.severity === 'error' ? ' severity-error' : ''}${isFixable(i) ? ' fixable' : ''}`;
+        if (!isFixable(i)) return `<li class="${classes}">${escapeHtml(i.message)}</li>`;
+        return `<li class="${classes}">
+          <span>${escapeHtml(i.message)}</span>
+          <button class="fix-btn" data-kind="${escapeHtml(i.kind)}" data-ids="${escapeHtml(i.scenarioIds.join(','))}" data-message="${escapeHtml(i.message)}">Fix</button>
+        </li>`;
+      })
       .join('') + metricsHtml(report.metrics);
   }
 
   qualityToggle.addEventListener('click', () => {
     const hidden = qualityIssues.classList.toggle('hidden');
     qualityToggle.textContent = hidden ? 'show' : 'hide';
+  });
+
+  // ---------- Fix issues ----------
+  // One endpoint for both buttons: with no scope it fixes everything fixable, with
+  // a scope (kind + test cases + message) it fixes just that one issue.
+  const FIXABLE_KINDS = ['outline', 'duplicate', 'cucumber', 'reuse', 'language'];
+  const fixLogger = makeLogger(fixLog, fixItems);
+  let fixing = false;
+
+  async function runFix(scope = {}) {
+    if (fixing || !currentRun) return;
+    fixing = true;
+    const buttons = [qualityFixBtn, ...qualityIssues.querySelectorAll('.fix-btn')];
+    buttons.forEach((b) => { b.disabled = true; });
+    qualityFixBtn.textContent = 'Fixing…';
+
+    // Show the log, and the issue list with it, so the user sees what is being fixed.
+    qualityIssues.classList.remove('hidden');
+    qualityToggle.textContent = 'hide';
+    fixLogger.reset();
+
+    try {
+      // Save pending inline edits first, so the fix works from what is on screen.
+      currentRun = await api(`/runs/${currentRun.id}`, { method: 'PUT', body: JSON.stringify(currentRun) });
+
+      const res = await fetch(`/api/runs/${currentRun.id}/fix-issues`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(scope),
+      });
+
+      await consumeSse(res, {
+        onProgress: (p) => fixLogger.log(p.message, p.kind),
+        onDone: async (run) => {
+          fixLogger.log('Done', 'done');
+          currentRun = run;
+          renderQuality();
+          renderScenarios();
+          renderCoverage();
+          loadVersions();
+        },
+        onFailed: (p) => fixLogger.log(p.error, 'failed'),
+      });
+    } catch (err) {
+      fixLogger.log(err.message, 'failed');
+    } finally {
+      fixing = false;
+      qualityFixBtn.disabled = false;
+      qualityFixBtn.textContent = 'Fix issues';
+      qualityIssues.querySelectorAll('.fix-btn').forEach((b) => { b.disabled = false; });
+    }
+  }
+
+  qualityFixBtn.addEventListener('click', () => runFix());
+  qualityIssues.addEventListener('click', (e) => {
+    const btn = e.target.closest('.fix-btn');
+    if (!btn) return;
+    runFix({ kind: btn.dataset.kind, scenarioIds: btn.dataset.ids.split(','), message: btn.dataset.message });
   });
 
   function renderRefineNotes() {
@@ -1518,7 +1592,7 @@
       });
 
       await consumeSse(res, {
-        onProgress: (p) => bulkLog.log(p.message),
+        onProgress: (p) => bulkLog.log(p.message, p.kind),
         onDone: async (run) => {
           bulkLog.log('Done', 'done');
           currentRun = run;
@@ -1546,6 +1620,7 @@
     resultsPanel.classList.remove('hidden');
     if (currentRun && currentRun.id !== collapsedForRunId) {
       collapsedForRunId = currentRun.id;
+      fixLog.classList.add('hidden'); // the last run's fix log is not this run's
       setStartCollapsed(true);
       // An imported sheet has no website yet — put the link field in front of the user.
       bulkCard.open = Boolean(currentRun.importedFrom) && !currentRun.sourceUrl;

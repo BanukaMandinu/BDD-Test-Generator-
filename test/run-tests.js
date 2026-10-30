@@ -956,6 +956,108 @@ group('update all — website check prompt', () => {
   });
 });
 
+group('autofix — repairing what the quality check reports', () => {
+  const autofix = require('../server/lib/autofix');
+  const cucumberChecks = require('../server/lib/cucumberChecks');
+
+  const outline = (rows, extra = {}) => scenario('o1', 'Verify Previous is disabled', [
+    step('a', 'Given', 'the <user> is on the first slide'),
+    step('b', 'Then', 'the Previous button is disabled for the <user>'),
+  ], { isOutline: true, examples: rows, ...extra });
+
+  test('an outline with one Examples row becomes a plain Scenario with the value written in', () => {
+    const s = outline([['user'], ['Instructor']]);
+    const notes = autofix.fixOutlineMechanically(s);
+    assert.strictEqual(s.isOutline, false);
+    assert.strictEqual(s.examples, null);
+    assert.strictEqual(s.steps[0].text, 'the Instructor is on the first slide');
+    assert.strictEqual(s.steps[1].text, 'the Previous button is disabled for the Instructor');
+    assert.strictEqual(notes.length, 1);
+    assert.strictEqual(quality.checkOutlines([s]).length, 0, 'the quality check is now satisfied');
+  });
+
+  test('placeholders in a step data table are filled too', () => {
+    const s = outline([['user'], ['Admin']]);
+    s.steps[0].dataTable = [['role'], ['<user>']];
+    autofix.fixOutlineMechanically(s);
+    assert.deepStrictEqual(s.steps[0].dataTable, [['role'], ['Admin']]);
+  });
+
+  test('an outline with several rows is left as an outline', () => {
+    const s = outline([['user'], ['Instructor'], ['Student']]);
+    assert.deepStrictEqual(autofix.fixOutlineMechanically(s), []);
+    assert.strictEqual(s.isOutline, true);
+    assert.strictEqual(s.steps[0].text, 'the <user> is on the first slide');
+  });
+
+  test('an Examples column no step uses is removed, the used one kept', () => {
+    const s = outline([['user', 'unused'], ['Instructor', 'x'], ['Student', 'y']]);
+    autofix.fixOutlineMechanically(s);
+    assert.deepStrictEqual(s.examples, [['user'], ['Instructor'], ['Student']]);
+    assert.strictEqual(s.isOutline, true);
+  });
+
+  test('an outline with no placeholders becomes a plain Scenario', () => {
+    const s = scenario('p', 'Plain', [step('a', 'Given', 'a page'), step('b', 'Then', 'it loads')], { isOutline: true, examples: [['x'], ['1']] });
+    autofix.fixOutlineMechanically(s);
+    assert.strictEqual(s.isOutline, false);
+    assert.strictEqual(s.examples, null);
+  });
+
+  test('placeholders with a matching table but no outline flag get flagged', () => {
+    const s = outline([['user'], ['A'], ['B']], { isOutline: false });
+    autofix.fixOutlineMechanically(s);
+    assert.strictEqual(s.isOutline, true);
+  });
+
+  test('a placeholder with no column is not guessed at — it is left for the model', () => {
+    const s = outline([['other'], ['1'], ['2']]);
+    const before = JSON.stringify(s);
+    assert.deepStrictEqual(autofix.fixOutlineMechanically(s), []);
+    assert.strictEqual(JSON.stringify(s), before, 'nothing is changed');
+    assert.ok(quality.checkOutlines([s]).some((i) => i.severity === 'error'), 'the error is still reported');
+  });
+
+  test('a duplicate is unticked with a reason, and the first one is kept', () => {
+    const a = scenario('a', 'Open the menu', [step('1', 'Given', 'the user is on the home page'), step('2', 'When', 'the user opens the menu'), step('3', 'Then', 'the menu items are listed')]);
+    const b = scenario('b', 'Menu opens', [step('4', 'Given', 'the user is on the home page'), step('5', 'When', 'the user opens the menu'), step('6', 'Then', 'the menu items are listed')]);
+    const issues = quality.findDuplicates([a, b]);
+    const flagged = autofix.flagDuplicates([a, b], issues);
+    assert.strictEqual(flagged.length, 1);
+    assert.strictEqual(a.included, true);
+    assert.strictEqual(b.included, false);
+    assert.match(b.lastReviewApplied, /^Suggested removal — .*Open the menu/);
+    assert.strictEqual(quality.findDuplicates([a, b]).length, 0);
+  });
+
+  test('a suite-wide voice problem names the cases that break the majority convention', () => {
+    const s1 = scenario('s1', 'One', [step('1', 'Given', 'the user is signed in'), step('2', 'When', 'the user opens the menu'), step('3', 'Then', 'the menu opens')]);
+    const s2 = scenario('s2', 'Two', [step('4', 'Given', 'the user is on the home page'), step('5', 'Then', 'the page loads')]);
+    const s3 = scenario('s3', 'Three', [step('6', 'Given', 'the customer is signed in'), step('7', 'Then', 'the page loads')]);
+    const voice = cucumberChecks.checkVoice([s1, s2, s3]).find((i) => /mixes/.test(i.message));
+    assert.deepStrictEqual(voice.scenarioIds, ['s3']);
+    assert.match(voice.instruction, /"user" everywhere/);
+  });
+
+  test('a step-reuse issue names the cases that use the less common wording', () => {
+    const wordings = ['the user is logged in to the account', 'the user is logged in to the account', 'the user is signed in to the account'];
+    const scenarios = wordings.map((text, i) => scenario(`r${i}`, `T${i}`, [step(`g${i}`, 'Given', text), step(`t${i}`, 'Then', 'the page loads')]));
+    const reuse = cucumberChecks.checkStepReuse(scenarios).issues.find((i) => i.kind === 'reuse');
+    assert.ok(reuse, 'a reuse issue is raised');
+    assert.deepStrictEqual(reuse.scenarioIds, ['r2']);
+    assert.match(reuse.instruction, /signed in to the account".*logged in to the account/);
+  });
+
+  test('the model brief carries only this case’s problems and forbids wider changes', () => {
+    const note = autofix.buildFixNote([{ message: 'A is wrong.' }, { message: 'A is wrong.' }, { message: 'B', instruction: 'Do B.' }]);
+    assert.match(note, /ONLY these quality problems/);
+    assert.strictEqual(note.split('- A is wrong.').length - 1, 1, 'duplicates collapse');
+    assert.match(note, /- Do B\./);
+    assert.ok(!note.includes('- B\n'), 'the instruction replaces the message');
+  });
+
+});
+
 // ---------------------------------------------------------------------------
 // Spreadsheet import is async (the workbook is parsed off a buffer), so its
 // checks run after the synchronous groups and are awaited before the summary.
@@ -1056,7 +1158,31 @@ async function excelImportTests() {
   });
 }
 
-excelImportTests().then(() => {
+async function fixPoolTests() {
+  console.log('\nautofix — worker pool');
+  const { runPool } = require('../server/lib/autofix');
+
+  await asyncTest('never runs more than its limit at once, and finishes every item', async () => {
+    let live = 0;
+    let peak = 0;
+    const seen = [];
+    await runPool([1, 2, 3, 4, 5, 6, 7], 3, async (n) => {
+      live++;
+      peak = Math.max(peak, live);
+      await new Promise((r) => setTimeout(r, 5));
+      seen.push(n);
+      live--;
+    });
+    assert.strictEqual(peak, 3);
+    assert.strictEqual(seen.length, 7);
+  });
+
+  await asyncTest('an empty list finishes immediately', async () => {
+    await runPool([], 3, async () => { throw new Error('should not run'); });
+  });
+}
+
+excelImportTests().then(fixPoolTests).then(() => {
   console.log(`\n${'='.repeat(52)}`);
   console.log(`${passed} passed, ${failed} failed`);
   if (failed) {

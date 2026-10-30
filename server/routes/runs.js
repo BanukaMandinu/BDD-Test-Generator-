@@ -25,9 +25,13 @@ const audit = require('../lib/audit');
 const { originFromUrl } = require('../lib/session');
 const quality = require('../lib/quality');
 const versions = require('../lib/versions');
+const autofix = require('../lib/autofix');
 
 const router = express.Router();
 const MAX_REVIEW_LENGTH = 2000;
+// How many test cases are rewritten at once by the Fix button. Each one is its own
+// model call, so this trades speed against how many the machine runs in parallel.
+const FIX_CONCURRENCY = 3;
 
 function getRunOr404(req, res) {
   const run = loadRun(req.params.id);
@@ -474,6 +478,7 @@ router.post('/runs/:id/update-all', async (req, res) => {
       .join('\n\n');
 
     versions.snapshot(run, 'review all');
+    const before = new Map(targets.map((s) => [s.id, autofix.fingerprint(s)]));
 
     const revised = await reviseAllScenarios({
       featureTitle: run.featureTitle,
@@ -491,6 +496,7 @@ router.post('/runs/:id/update-all', async (req, res) => {
     let updatedCount = 0;
     let flaggedCount = 0;
     const added = [];
+    const outcomes = new Map(); // scenario id -> { changed, flagged }
 
     for (const returned of revised.scenarios || []) {
       const ref = Number(returned.ref);
@@ -505,16 +511,30 @@ router.post('/runs/:id/update-all', async (req, res) => {
         // Removal is only ever a proposal, and only when a live site was checked:
         // the case is unticked (so it drops out of export and further reviews) but
         // stays on screen with the reason, and History can restore it.
-        if (checkWebsite && returned.remove === true) {
+        const flagged = checkWebsite && returned.remove === true;
+        if (flagged) {
           scenario.included = false;
           scenario.lastReviewApplied = `Suggested removal — ${String(returned.removeReason || 'not found on the website').slice(0, 300)}`;
           flaggedCount++;
         }
+        outcomes.set(scenario.id, { changed: autofix.fingerprint(scenario) !== before.get(scenario.id), flagged });
         updatedCount++;
       } else if (returned.steps?.length) {
         added.push(newScenarioFromModel(returned));
       }
     }
+
+    // One line per test case, so the activity log shows what happened to each.
+    targets.forEach((scenario) => {
+      const at = run.scenarios.indexOf(scenario);
+      const name = `${autofix.labelFor(scenario, at)} ${autofix.shortTitle(scenario.title)}`;
+      const outcome = outcomes.get(scenario.id);
+      if (!outcome) send('progress', { message: `${name} — not returned by the review, left as it was` });
+      else if (outcome.flagged) send('progress', { message: `${name} — unticked: ${autofix.shortTitle(scenario.lastReviewApplied.replace(/^Suggested removal — /, ''), 160)}` });
+      else if (outcome.changed) send('progress', { message: `${name} — updated`, kind: 'done' });
+      else send('progress', { message: `${name} — already fine, unchanged` });
+    });
+    added.forEach((scenario) => send('progress', { message: `New: ${autofix.shortTitle(scenario.title)} — added`, kind: 'done' }));
 
     run.scenarios.push(...added);
 
@@ -529,12 +549,157 @@ router.post('/runs/:id/update-all', async (req, res) => {
       detail: `${updatedCount} revised, ${added.length} added${flaggedCount ? `, ${flaggedCount} flagged for removal` : ''}${checkWebsite ? ' (checked against website)' : ''}`,
     });
 
+    const changedCount = [...outcomes.values()].filter((o) => o.changed && !o.flagged).length;
     send('progress', {
-      message: `Revised ${updatedCount} test case${updatedCount === 1 ? '' : 's'}${added.length ? `, added ${added.length} new one${added.length === 1 ? '' : 's'}` : ''}${flaggedCount ? `, unticked ${flaggedCount} that the website doesn't seem to have` : ''}`,
+      message: `Revised ${changedCount} of ${updatedCount} test case${updatedCount === 1 ? '' : 's'}${added.length ? `, added ${added.length} new one${added.length === 1 ? '' : 's'}` : ''}${flaggedCount ? `, unticked ${flaggedCount} that the website doesn't seem to have` : ''}`,
     });
     send('done', run);
   } catch (err) {
     console.error('update-all failed:', err.message);
+    send('failed', { error: err.message });
+  } finally {
+    clearInterval(heartbeat);
+    res.end();
+  }
+});
+
+// Fixes the problems the quality check reported. Optional body fields narrow it to
+// one issue (kind + scenarioIds + message, as the per-issue Fix button sends) or
+// one kind; with none it fixes everything fixable. The issue list is recomputed
+// here from the saved run, never taken from the client.
+router.post('/runs/:id/fix-issues', async (req, res) => {
+  const run = loadRun(req.params.id);
+  if (!run) return res.status(404).json({ error: 'run not found' });
+
+  const kind = typeof req.body?.kind === 'string' ? req.body.kind : null;
+  if (kind && !autofix.FIXABLE_KINDS.includes(kind)) {
+    return res.status(400).json({ error: 'Those issues cannot be fixed automatically.' });
+  }
+  const onlyIds = Array.isArray(req.body?.scenarioIds) ? new Set(req.body.scenarioIds.map(String)) : null;
+  const onlyMessage = typeof req.body?.message === 'string' ? req.body.message : null;
+
+  const wanted = (issue) =>
+    autofix.FIXABLE_KINDS.includes(issue.kind)
+    && (!kind || issue.kind === kind)
+    && (!onlyMessage || issue.message === onlyMessage)
+    && (issue.scenarioIds || []).length > 0
+    && (!onlyIds || issue.scenarioIds.some((id) => onlyIds.has(id)));
+
+  const wantedIssues = quality.inspect(run).issues.filter(wanted);
+  if (!wantedIssues.length) {
+    return res.status(400).json({ error: 'There is nothing to fix here — the quality check has changed since it was shown. Reload the run and try again.' });
+  }
+
+  res.setHeader('Content-Type', 'text/event-stream');
+  res.setHeader('Cache-Control', 'no-cache');
+  res.setHeader('Connection', 'keep-alive');
+  res.setHeader('X-Accel-Buffering', 'no');
+  res.flushHeaders();
+
+  const send = (event, data) => res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
+  const heartbeat = setInterval(() => res.write(': ping\n\n'), 15000);
+
+  const name = (scenario) => `${autofix.labelFor(scenario, run.scenarios.indexOf(scenario))} ${autofix.shortTitle(scenario.title)}`;
+  const inScope = (issue) => (issue.scenarioIds || []).filter((id) => !onlyIds || onlyIds.has(id));
+
+  try {
+    const affected = new Set(wantedIssues.flatMap(inScope));
+    send('progress', {
+      message: `Fixing ${wantedIssues.length} issue${wantedIssues.length === 1 ? '' : 's'} across ${affected.size} test case${affected.size === 1 ? '' : 's'}`,
+    });
+
+    versions.snapshot(run, 'fix quality issues');
+    const tally = { mechanical: 0, flagged: 0, rewritten: 0, unchanged: 0, failed: 0, skipped: 0 };
+
+    // 1. Mechanical outline repairs: one right answer, so no model call.
+    const outlineIds = new Set(wantedIssues.filter((i) => i.kind === 'outline').flatMap(inScope));
+    for (const scenario of run.scenarios) {
+      if (scenario.included === false || !outlineIds.has(scenario.id)) continue;
+      const notes = autofix.fixOutlineMechanically(scenario);
+      if (!notes.length) continue;
+      tally.mechanical++;
+      send('progress', { message: `${name(scenario)} — ${notes.join('; ')}`, kind: 'done' });
+    }
+
+    // 2. Duplicates: untick the later one, with the reason on its card.
+    const dupes = autofix.flagDuplicates(run.scenarios, wantedIssues.filter((i) => i.kind === 'duplicate'));
+    for (const d of dupes) {
+      tally.flagged++;
+      send('progress', { message: `${name(d.scenario)} — unticked: same test as ${name(d.of.scenario)}` });
+    }
+
+    // 3. Everything that needs judgment: one model call per test case, a few at a time.
+    const remaining = quality.inspect(run).issues.filter((i) => i.kind !== 'duplicate' && wanted(i));
+    const issuesByScenario = new Map();
+    for (const issue of remaining) {
+      for (const id of inScope(issue)) {
+        if (!issuesByScenario.has(id)) issuesByScenario.set(id, []);
+        issuesByScenario.get(id).push(issue);
+      }
+    }
+
+    const queue = [];
+    for (const scenario of run.scenarios) {
+      const issues = issuesByScenario.get(scenario.id);
+      if (!issues || scenario.included === false) continue;
+      if (!scenario.steps.some(isRevisable)) {
+        tally.skipped++;
+        send('progress', { message: `${name(scenario)} — skipped: every step is unticked, so there is nothing it may rewrite` });
+        continue;
+      }
+      queue.push({ scenario, issues, n: queue.length + 1 });
+    }
+
+    // Keep the instant fixes even if the slow part is interrupted.
+    if (tally.mechanical || tally.flagged) saveRun(run);
+
+    await autofix.runPool(queue, FIX_CONCURRENCY, async ({ scenario, issues, n }) => {
+      const position = `[${n}/${queue.length}]`;
+      send('progress', { message: `${position} ${name(scenario)} — rewriting (${issues.length} issue${issues.length === 1 ? '' : 's'})` });
+      const before = autofix.fingerprint(scenario);
+      try {
+        const revised = await reviseScenario({
+          scenario,
+          requirements: run.requirements,
+          review: autofix.buildFixNote(issues),
+          formattedSteps: formatStepsForPrompt(scenario.steps),
+          formattedExamples: formatExamplesForPrompt(scenario),
+        });
+        // The title is never part of a quality fix, so it is left exactly as it was.
+        scenario.steps = reconcileSteps(scenario.steps, revised.steps);
+        applyOutlineFromModel(scenario, revised);
+        if (autofix.fingerprint(scenario) !== before) {
+          scenario.lastReviewApplied = `Quality fix — ${issues.length} issue${issues.length === 1 ? '' : 's'}`;
+          tally.rewritten++;
+          send('progress', { message: `${position} ${name(scenario)} — fixed`, kind: 'done' });
+        } else {
+          tally.unchanged++;
+          send('progress', { message: `${position} ${name(scenario)} — no change needed` });
+        }
+      } catch (err) {
+        tally.failed++;
+        send('progress', { message: `${position} ${name(scenario)} — could not be fixed: ${autofix.shortTitle(err.message, 160)}`, kind: 'failed' });
+      }
+    });
+
+    run.quality = quality.inspect(run);
+    saveRun(run);
+    audit.record('fix-issues', {
+      runId: run.id,
+      detail: `${tally.mechanical} repaired, ${tally.rewritten} rewritten, ${tally.flagged} unticked, ${tally.failed} failed`,
+    });
+
+    const parts = [];
+    if (tally.mechanical) parts.push(`${tally.mechanical} repaired`);
+    if (tally.rewritten) parts.push(`${tally.rewritten} rewritten`);
+    if (tally.flagged) parts.push(`${tally.flagged} duplicate${tally.flagged === 1 ? '' : 's'} unticked`);
+    if (tally.unchanged) parts.push(`${tally.unchanged} needed no change`);
+    if (tally.skipped) parts.push(`${tally.skipped} skipped`);
+    if (tally.failed) parts.push(`${tally.failed} failed`);
+    send('progress', { message: `${parts.join(', ') || 'Nothing changed'}. ${quality.summarize(run.quality)}` });
+    send('done', run);
+  } catch (err) {
+    console.error('fix-issues failed:', err.message);
     send('failed', { error: err.message });
   } finally {
     clearInterval(heartbeat);

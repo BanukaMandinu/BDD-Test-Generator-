@@ -116,6 +116,17 @@ These run on every generation, save, and update — no AI call, instant, and the
 | Step reuse | Near-verbatim step pairs that would each need their own step definition, plus a **reuse metric**: total steps, distinct step definitions required, and the ratio |
 | Plain-English lint | Steps that drifted into UI mechanics (`clicks`, selectors, HTTP verbs, `shall`), hardcoded URLs, or ran past ~22 words |
 
+#### Fixing what it reports
+
+Every issue that names test cases has a **Fix** button, and **Fix issues** in the bar header fixes them all. The **Fixing issues** log shows one line per test case as it is handled.
+
+- **Repaired instantly, no AI:** an outline with one Examples row becomes a plain Scenario with the value filled in; an unused Examples column is removed; an outline with no placeholders becomes a plain Scenario.
+- **Rewritten by the model, one test case at a time (three in parallel):** Cucumber grammar, step smells, wording, voice and step-reuse issues. Each call is told only that case's problems, to keep its title and what it verifies, and to leave unaffected steps word-for-word.
+- **Duplicates are unticked, not deleted**, with the reason on the card. Re-tick one to keep it.
+- Not fixable with a button: uncovered requirements and missing test types, which need new test cases written.
+
+Each fix is saved as a version first, so **History** can compare or restore it.
+
 The deterministic checks and the AI review pass catch different things: the checks catch near-verbatim repeats reliably, the review pass catches *semantic* duplicates (two scenarios differing only by input value) that word-overlap can't see.
 
 1. **Generate** — paste either:

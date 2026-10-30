@@ -1,6 +1,6 @@
 {
   "name": "bdd-test-generator",
-  "version": "1.3.0",
+  "version": "1.3.1",
   "description": "Local framework that generates, reviews, and tracks BDD test cases (Gherkin) via Claude, acting as a senior QA lead. Includes a review UI and a requirement-coverage tracker.",
   "author": "Banuka Nanayakkara",
   "main": "server/index.js",
