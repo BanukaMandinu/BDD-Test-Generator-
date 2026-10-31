@@ -46,6 +46,10 @@ server/            Express backend (API + static file serving)
     excel.js          Workbook builder (Summary / Test Cases / Traceability)
     excelImport.js    Reads an uploaded .xlsx back in: lists its sheets, parses the chosen one
     signin.js         "Open a sign-in window": a visible browser the user signs in to, saved as a profile
+    paths.js          Where runs, history and the saved sign-in are kept (BDD_DATA_DIR)
+    pdf.js            The printable PDF of the ticked test cases
+    codegenImport.js  Reads a Playwright codegen script into recorded flows (never runs it)
+    autofix.js        The Fix button: instant outline repairs, duplicate flagging, per-case rewrites
     store.js          Saves/loads each generation run as a JSON file in data/runs
     session.js        Borrowing a signed-in session from your own browser: the
                        console snippet, and conversion to a Playwright storageState
@@ -125,7 +129,7 @@ Every issue that names test cases has a **Fix** button, and **Fix issues** in th
 - **Duplicates are unticked, not deleted**, with the reason on the card. Re-tick one to keep it.
 - Not fixable with a button: uncovered requirements and missing test types, which need new test cases written.
 
-Each fix is saved as a version first, so **History** can compare or restore it.
+Each fix is saved as a version first, so **History** can show you exactly what changed. History compares versions; it has no restore button yet, so to undo a fix, re-tick or re-type what you want.
 
 The deterministic checks and the AI review pass catch different things: the checks catch near-verbatim repeats reliably, the review pass catches *semantic* duplicates (two scenarios differing only by input value) that word-overlap can't see.
 
@@ -193,15 +197,31 @@ Scenario Outline: Verify each main navigation link opens its section
 
 ### History and diffs
 
-Every change — a manual edit, a review, a gap fill — snapshots the previous state first. Pick a version from **Compare with earlier version** to see exactly what changed: scenarios added or removed, titles renamed, steps added or dropped, and ticks flipped. Use it to check what a review pass actually did before you accept it. The last 50 versions per run are kept.
+Every change — a manual save, a review, a gap fill, a fix — snapshots the previous state first. Pick a version from **History** to see exactly what changed: scenarios added or removed, titles renamed, steps added or dropped, and ticks flipped. Use it to check what a review pass actually did before you accept it. The last 50 versions per run are kept.
+
+With a version selected, **Restore this version** puts the run back to it. What the run is now is saved to History first (as "before restoring …"), so a restore can itself be undone the same way.
+
+### Saving
+
+Edits are **saved automatically** a couple of seconds after you stop typing; the bar next to **Save changes** says *Unsaved changes* or *All changes saved*. Autosave adds a History entry only when the newest one is more than 10 minutes old, so History isn't buried; **Save changes** always adds one. Every download, and switching to another run, saves first, so a file always matches what is on screen. Closing or reloading with something unsaved asks first.
+
+**Delete this run** (next to History) removes a run and its history after you confirm. It cannot be undone, so download the Share file first if you might want it back. The **Filter runs** box beside the run picker narrows a long list.
+
+### Where your data is kept
+
+Run from the project folder, runs, history, the audit log and the saved sign-in live in `data/` and `.browser-profile/` beside the code. The **installed Windows app keeps them in your user profile** (`%APPDATA%\bdd-test-generator-desktop\data`), not in its install folder, because every update replaces the install folder. Set `BDD_DATA_DIR` to a folder of your choice to move them anywhere.
 
 ### Exports
 
 | Button | File | Contains |
 |---|---|---|
-| Export .feature | `.feature` | Gherkin with type tags and aligned data tables — drops into a Cucumber repo |
-| Export Excel | `.xlsx` | **Summary** (counts, type breakdown, gaps) · **Test Cases** (Test ID / Summary / Description / Test Steps / Priority / Test Type) · **Traceability** |
-| Export traceability matrix | `.xlsx` | Traceability + Summary only |
+| .feature | `.feature` | Gherkin with type tags and aligned data tables — drops into a Cucumber repo. Each test case's Test ID is a `# Test ID:` comment and its Description a `Precondition:` line under the Scenario; both are read back on import |
+| Excel | `.xlsx` | **Summary** (counts, type breakdown, gaps) · **Test Cases** (Test ID / Summary / Description / Test Steps / Priority / Test Type) · **Traceability** |
+| PDF | `.pdf` | A printable document of the ticked test cases: a table of all cases, then one block each with Test ID, precondition, steps and Examples. Uses the same IDs as the Excel. Needs Chrome or Edge installed (it prints the page with the browser the app already uses) |
+| Traceability matrix | `.xlsx` | Traceability + Summary only |
+| Share file | `.testrun.json` | Everything, for a colleague — see [Sharing a run](#sharing-a-run-with-a-colleague) |
+
+The Description column is the test case's **precondition** (who the user must be signed in as, and what must already be true) and the Summary column is just its title.
 
 The Test Cases sheet uses the same column layout as the team's `scripts-to-excel` skill, so it drops into the existing QA tracker. Priority is inferred from the test type (happy path and security are High); adjust it in the sheet.
 
@@ -243,8 +263,8 @@ You can hand a run to someone else and they can carry on reviewing, revising and
 
 | Export | Carries | Use when |
 |---|---|---|
-| **Share file (JSON)** — `*.testrun.json` | Everything: requirements, coverage ticks, test types, Scenario Outlines + Examples, data tables, and which steps are ticked | Handing work to a teammate — **prefer this** |
-| **Export .feature** | Scenarios, steps, tables, outlines, and `@tags` | The file also has to go into a repo, Jira, or a Cucumber runner |
+| **Share file (JSON)** — `*.testrun.json` | Everything: requirements, coverage ticks, test types, Scenario Outlines + Examples, data tables, which steps are ticked, each test case's **Test ID and Description**, and the **website link** | Handing work to a teammate — **prefer this** |
+| **.feature** | Scenarios, steps, tables, outlines, `@tags`, Test IDs and descriptions (as above) | The file also has to go into a repo, Jira, or a Cucumber runner |
 
 **To send:** open the run, click **Share file (JSON)** (or **Export .feature**), and send them the file.
 
@@ -260,6 +280,14 @@ Drop a `.xlsx` workbook onto the import box (or click **Import…**). If it has 
 - The sheet name becomes the feature title. It becomes a new run; your workbook is never modified — export produces a new file.
 - Cells are read as text only (formulas are never evaluated); 2 MB and 2,000-row caps apply.
 
+### Importing a Playwright codegen script
+
+Already recorded a flow with Playwright's code generator — the VS Code extension's **Record new**, or `npx playwright codegen`? Click **Import a codegen script** on the start screen and choose the `.js`, `.ts` or `.py` file. Each `test(…)` (or Python `def test_…`) becomes a recorded flow, and test cases are written from it exactly as for a flow recorded in the app.
+
+- The script is **only read, never run**. Lines the importer doesn't understand (a custom helper, an unusual assertion) are skipped and counted in the activity log.
+- Codegen scripts usually contain real passwords. Anything typed into a password-like field is dropped, and card-, SSN- and token-shaped values are redacted.
+- It understands `goto`, `click`, `fill`, `check`/`uncheck`, `selectOption`, `setInputFiles`, and `expect(…).toBeVisible() / toHaveText() / toContainText() / toHaveValue()`, using `getByRole`, `getByLabel`, `getByPlaceholder`, `getByText`, `getByTestId` and `locator(…)` — in both the JavaScript and Python forms. A `locator('#id')` selector comes through as the element's name, which the model treats as less reliable than a real label.
+
 ### Checking a suite against your website
 
 An imported sheet (or any run) can be audited against the real site. Open **Update all test cases — or check them against your website**, enter the **Website link**, and tick **Go through the website while updating**. Leave the note empty (or click **Fill in the “check my website” note**) and click **Update all**.
@@ -270,11 +298,13 @@ The app opens the site read-only in a headless browser, follows its main navigat
 - **flags** test cases for things it looked for and could not find — they are **unticked**, with the reason shown on the card ("Suggested removal — …"), never deleted. Re-tick one to keep it, or use **History** to compare;
 - **adds** test cases for meaningful features it saw that nothing covers.
 
+By default the check is **read-only**: it can open pages by link but cannot press buttons, so it can't get past something like an "Enter Classroom" button. Tick **Let it click through the site** to allow that, for **test or dev sites only**. In this mode it can click and go back, but it has no tool to type or fill a form, and it is told never to press Delete, Save, Submit, Pay, Sign out and the like. That last part is an instruction to the model, **not a technical lock** — a click on the wrong button is still a click — so never use it on a production site. If the address doesn't look like a test site (no `dev`, `test`, `staging`, `qa`, `localhost`… in the name) you are asked to confirm every time, and the choice is never carried over to the next run.
+
 If the site needs a sign-in the app can't pass, it changes nothing and says so. Tick **Use my saved sign-in** for sites behind a login (see [Pages behind a login](#pages-behind-a-login)). Unticked test cases are left alone, as with any update.
 
 A `.feature` file carries no requirements list, so the **Coverage** tab starts empty when you import one (the app tells you). Test types are recovered from `@tags`, so a file this app produced keeps them. That's why the JSON share file is the better handoff.
 
-Imports are treated as untrusted input: 2 MB cap, bounded scenario/step/row counts, fresh ids assigned throughout, and `Background:` / `Rule:` blocks are flattened rather than dropped — with a note telling you what changed.
+Imports are treated as untrusted input: 2 MB cap, bounded scenario/step/row counts, fresh ids assigned throughout, and `Background:` / `Rule:` blocks are flattened rather than dropped — with a note telling you what changed. Anything the limits cut (more than 500 test cases, more than 200 steps in one, more than 500 Examples rows) or skip (a test case with no steps) is listed in a warning, never dropped silently. A website link in a shared file is kept only if it is a plain http(s) link.
 
 ### Pages behind a login
 
@@ -356,7 +386,7 @@ Requirement text, URLs, and generated test cases are processed through your Clau
 
 Note that pointing it at a **URL** sends that page's rendered content to the model, not just the URL — so an internal page containing real records means that content leaves your machine. Prefer staging environments seeded with synthetic data. Guidance here is general: validate it against your own legal/compliance counsel before using this on a regulated project.
 
-Every generate/save/update action is appended to `data/audit.log` (action, run id, timestamp) for traceability. Requirement and test case content is *not* written to the audit log — only to the per-run JSON files in `data/runs`.
+Every generate/save/update/delete/restore action is appended to `audit.log` in the data folder (action, run id, timestamp) for traceability. Requirement and test case content is *not* written to the audit log — only to the per-run JSON files in `runs/`. The data folder is `data/` in the project, or `%APPDATA%\bdd-test-generator-desktop\data` in the installed app (see [Where your data is kept](#where-your-data-is-kept)).
 
 ## Sharing this with others
 

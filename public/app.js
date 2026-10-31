@@ -754,6 +754,35 @@
     startRecording(url);
   });
 
+  // A script from Playwright codegen: read into recorded flows, then written up
+  // exactly like a live recording. The script is only read, never run.
+  const codegenBtn = el('codegenBtn');
+  const codegenFile = el('codegenFile');
+  codegenBtn.addEventListener('click', () => codegenFile.click());
+  codegenFile.addEventListener('change', async () => {
+    const file = codegenFile.files[0];
+    codegenFile.value = '';
+    if (!file) return;
+    if (file.size > 500 * 1024) {
+      setStatus(generateStatus, 'That script is too large to import (limit 500 KB).', 'error');
+      return;
+    }
+    setStatus(generateStatus, 'Reading the script…');
+    try {
+      const { flows, warnings } = await api('/codegen/parse', {
+        method: 'POST',
+        body: JSON.stringify({ content: await file.text(), filename: file.name }),
+      });
+      const steps = flows.reduce((n, f) => n + f.actions.length, 0);
+      await runGeneration({
+        recordings: flows,
+        notes: [`Read ${flows.length} test${flows.length === 1 ? '' : 's'} (${steps} steps) from ${file.name}`, ...warnings],
+      });
+    } catch (err) {
+      setStatus(generateStatus, err.message, 'error');
+    }
+  });
+
   generateFromRecordingsBtn.addEventListener('click', async () => {
     if (!recordingSessionId) return;
     generateFromRecordingsBtn.disabled = true;
@@ -1183,6 +1212,7 @@
     try {
       // Save pending inline edits first, so the fix works from what is on screen.
       currentRun = await api(`/runs/${currentRun.id}`, { method: 'PUT', body: JSON.stringify(currentRun) });
+      markClean();
 
       const res = await fetch(`/api/runs/${currentRun.id}/fix-issues`, {
         method: 'POST',
@@ -1199,6 +1229,7 @@
           renderScenarios();
           renderCoverage();
           loadVersions();
+          markClean();
         },
         onFailed: (p) => fixLogger.log(p.error, 'failed'),
       });
@@ -1242,6 +1273,7 @@
           `<option value="${v.versionId}">${escapeHtml(v.action)} · ${new Date(v.at).toLocaleTimeString()} (${v.scenarioCount} cases)</option>`
         ).join('');
       versionSelect.disabled = !list.length;
+      el('restoreVersionBtn').classList.add('hidden');
       diffPanel.classList.add('hidden');
       diffSummary.textContent = list.length ? '' : 'no earlier versions yet';
     } catch {
@@ -1299,7 +1331,10 @@
     diffPanel.classList.remove('hidden');
   }
 
+  const restoreVersionBtn = el('restoreVersionBtn');
+
   versionSelect.addEventListener('change', async () => {
+    restoreVersionBtn.classList.toggle('hidden', !versionSelect.value);
     if (!versionSelect.value) {
       diffPanel.classList.add('hidden');
       diffSummary.textContent = '';
@@ -1314,6 +1349,28 @@
         : `+${d.added.length} −${d.removed.length} ~${d.changed.length}`;
     } catch (err) {
       diffSummary.textContent = err.message;
+    }
+  });
+
+  restoreVersionBtn.addEventListener('click', async () => {
+    const versionId = versionSelect.value;
+    if (!versionId || !currentRun) return;
+    const ok = await customConfirm(
+      'Put this run back to the version you selected? What it is now is saved to History first, so you can undo this.',
+      { okLabel: 'Restore' }
+    );
+    if (!ok) return;
+    restoreVersionBtn.disabled = true;
+    diffSummary.textContent = 'restoring…';
+    try {
+      await ensureSaved(); // so the "before restore" copy holds the latest edits
+      currentRun = await api(`/runs/${currentRun.id}/versions/${versionId}/restore`, { method: 'POST', body: '{}' });
+      showRun();
+      diffSummary.textContent = 'restored';
+    } catch (err) {
+      diffSummary.textContent = err.message;
+    } finally {
+      restoreVersionBtn.disabled = false;
     }
   });
 
@@ -1342,6 +1399,18 @@
   const bulkSessionHint = el('bulkSessionHint');
   const bulkSessionSetupBtn = el('bulkSessionSetupBtn');
   const websitePromptBtn = el('websitePromptBtn');
+  const allowClicksToggle = el('allowClicksToggle');
+
+  // A guess, used only to decide whether to ask "are you sure?" before the check is
+  // allowed to click. It can be wrong in both directions, which is why the toggle
+  // says test sites only and a doubtful host is always confirmed.
+  function looksLikeTestSite(link) {
+    let host = '';
+    try { host = new URL(parseSiteLink(link) || '').hostname; } catch { return false; }
+    return host === 'localhost'
+      || /^(127\.|10\.|192\.168\.)/.test(host)
+      || /(^|[.-])(dev|test|testing|staging|stage|stg|qa|uat|sandbox|demo|preview|local)([.-]|$)/i.test(host);
+  }
   let savedSession = { available: false, origin: null };
 
   // What a reviewer means by "go through the website and fix the test cases".
@@ -1393,11 +1462,47 @@
   async function loadRunList(selectId) {
     const runs = await api('/runs');
     runSelect.innerHTML = '<option value="">— new —</option>' +
-      runs.map((r) => `<option value="${r.id}">${escapeHtml(r.featureTitle)} (${new Date(r.updatedAt).toLocaleString()})</option>`).join('');
+      runs.map((r) => `<option value="${r.id}">${escapeHtml(r.featureTitle)} · ${r.scenarioCount} case${r.scenarioCount === 1 ? '' : 's'} (${new Date(r.updatedAt).toLocaleString()})</option>`).join('');
     if (selectId) runSelect.value = selectId;
+    applyRunFilter();
   }
 
+  // Hides runs that do not match what was typed. The open run always stays listed.
+  const runFilter = el('runFilter');
+  function applyRunFilter() {
+    const q = runFilter.value.trim().toLowerCase();
+    [...runSelect.options].forEach((opt) => {
+      if (!opt.value) return;
+      opt.hidden = Boolean(q) && !opt.textContent.toLowerCase().includes(q) && opt.value !== runSelect.value;
+    });
+  }
+  runFilter.addEventListener('input', applyRunFilter);
+
+  const deleteRunBtn = el('deleteRunBtn');
+  deleteRunBtn.addEventListener('click', async () => {
+    if (!currentRun) return;
+    const ok = await customConfirm(
+      `Delete "${currentRun.featureTitle}" and its history? This cannot be undone. Download the Share file first if you might want it back.`,
+      { okLabel: 'Delete', danger: true }
+    );
+    if (!ok) return;
+    try {
+      clearTimeout(autosaveTimer);
+      if (autosaving) await autosaving;
+      await api(`/runs/${currentRun.id}`, { method: 'DELETE' });
+      currentRun = null;
+      savedSnapshot = null;
+      resultsPanel.classList.add('hidden');
+      setStartCollapsed(false);
+      await loadRunList();
+      runSelect.value = '';
+    } catch (err) {
+      diffSummary.textContent = err.message;
+    }
+  });
+
   runSelect.addEventListener('change', async () => {
+    await ensureSaved(); // the run being left keeps its edits
     if (!runSelect.value) {
       resultsPanel.classList.add('hidden');
       setStartCollapsed(false);
@@ -1471,7 +1576,7 @@
   // ---------- Generate (streamed over SSE) ----------
   // Shared by three entry points: straight from the input box, from the page
   // picker after a discovery crawl, and from a finished recording session.
-  async function runGeneration({ pages = null, recordings = null } = {}) {
+  async function runGeneration({ pages = null, recordings = null, notes = [] } = {}) {
     const text = inputText.value.trim();
     if (!pages && !recordings && !text) {
       setStatus(generateStatus, 'Please paste a link or describe what to test first.', 'error');
@@ -1489,6 +1594,7 @@
     recordBtn.disabled = true;
     setStatus(statusNode, 'Working…');
     generateLog.reset();
+    notes.forEach((n) => generateLog.log(n));
 
     try {
       const res = await fetch('/api/generate', {
@@ -1577,6 +1683,17 @@
       return;
     }
 
+    // Clicking can have side effects on a live site, so a site that does not look
+    // like a test environment has to be confirmed — every time, not once.
+    const allowClicks = checkWebsite && allowClicksToggle.checked;
+    if (allowClicks && !looksLikeTestSite(currentRun.sourceUrl)) {
+      const ok = await customConfirm(
+        `${parseSiteLink(currentRun.sourceUrl)} does not look like a test or dev site. Letting the check click through it could change real data. Only continue if this is a safe place to click.`,
+        { okLabel: 'Click through anyway', danger: true }
+      );
+      if (!ok) return;
+    }
+
     // Persist any pending inline edits first, so the update works from what's on screen.
     updateAllBtn.disabled = true;
     setStatus(bulkReviewStatus, 'Working…');
@@ -1588,7 +1705,7 @@
       const res = await fetch(`/api/runs/${currentRun.id}/update-all`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ review, checkWebsite, useSession: checkWebsite && bulkSessionToggle.checked }),
+        body: JSON.stringify({ review, checkWebsite, allowClicks, useSession: checkWebsite && bulkSessionToggle.checked }),
       });
 
       await consumeSse(res, {
@@ -1602,6 +1719,7 @@
           renderQuality();
           renderScenarios();
           renderCoverage();
+          markClean();
         },
         onFailed: (p) => {
           bulkLog.log(p.error, 'failed');
@@ -1631,6 +1749,7 @@
     renderScenarios();
     renderCoverage();
     loadVersions();
+    markClean();
   }
 
   // ---------- Feature header ----------
@@ -1640,6 +1759,7 @@
     sourceUrlNote.textContent = currentRun.sourceUrl ? `Source: ${currentRun.sourceUrl}` : '';
     sourceUrlInput.value = currentRun.sourceUrl || '';
     checkWebsiteToggle.checked = Boolean(currentRun.sourceUrl);
+    allowClicksToggle.checked = false; // clicking is chosen deliberately each time, never carried over
     syncBulkSession();
     suggestSessionUrl();
   }
@@ -2018,6 +2138,7 @@
         Object.assign(scenario, generated);
         renderScenarios();
         renderCoverage();
+        markClean();
       } catch (err) {
         setStatus(statusNode, err.message, 'error');
         e.target.disabled = false;
@@ -2058,6 +2179,7 @@
         const { description } = await api(`/runs/${currentRun.id}/scenarios/${scenario.id}/describe`, { method: 'POST', body: '{}' });
         scenario.description = description;
         box.value = description;
+        markClean();
         setStatus(statusNode, 'Description written.', 'ok');
       } catch (err) {
         setStatus(statusNode, err.message, 'error');
@@ -2080,6 +2202,7 @@
         });
         Object.assign(scenario, updated);
         renderScenarios();
+        markClean();
       } catch (err) {
         setStatus(statusNode, err.message, 'error');
         e.target.disabled = false;
@@ -2274,16 +2397,122 @@
     }
   }
 
-  saveRunBtn.addEventListener('click', () => saveCurrentRun(saveStatus, saveRunBtn));
-  saveCoverageBtn.addEventListener('click', () => saveCurrentRun(coverageSaveStatus, saveCoverageBtn));
-
-  exportBtn.addEventListener('click', () => {
-    window.location.href = `/api/runs/${currentRun.id}/export`;
+  saveRunBtn.addEventListener('click', async () => {
+    await saveCurrentRun(saveStatus, saveRunBtn);
+    markClean();
+    loadVersions(); // the save just added a History entry
+  });
+  saveCoverageBtn.addEventListener('click', async () => {
+    await saveCurrentRun(coverageSaveStatus, saveCoverageBtn);
+    markClean();
+    loadVersions();
   });
 
-  el('exportXlsxBtn').addEventListener('click', () => {
-    window.location.href = `/api/runs/${currentRun.id}/export.xlsx`;
+  // ---------- Unsaved changes: autosave, a visible state, and no silent loss ----------
+  // Edits live in the browser until saved, and used to be lost on a reload — and a
+  // download exported the last SAVED copy, not what was on screen. So: autosave a
+  // couple of seconds after the last edit, save before any download or run switch,
+  // and warn before leaving with anything unsaved.
+  const saveState = el('saveState');
+  const AUTOSAVE_DELAY_MS = 2500;
+  let savedSnapshot = null;
+  let autosaveTimer = null;
+  let autosaving = null;
+
+  const snapshotOf = (run) => JSON.stringify({
+    t: run.featureTitle, d: run.featureDescription, u: run.sourceUrl || null, r: run.requirements, s: run.scenarios,
   });
+
+  function markClean() {
+    savedSnapshot = currentRun ? snapshotOf(currentRun) : null;
+    renderSaveState();
+  }
+
+  function isDirty() {
+    return Boolean(currentRun) && savedSnapshot !== null && snapshotOf(currentRun) !== savedSnapshot;
+  }
+
+  // A running update, generate, fix or describe owns the run until it finishes.
+  function isBusy() {
+    return fixing || Boolean(document.querySelector(
+      '#updateAllBtn:disabled, #saveRunBtn:disabled, .scenario-card .primary:disabled, .scenario-card .link-btn:disabled'
+    ));
+  }
+
+  function renderSaveState(text) {
+    if (!saveState) return;
+    const dirty = isDirty();
+    saveState.textContent = text || (!currentRun ? '' : dirty ? 'Unsaved changes' : 'All changes saved');
+    saveState.classList.toggle('unsaved', dirty && !text);
+  }
+
+  // Saves quietly: no history entry, and it never replaces what is on screen, so
+  // text typed while the request is in flight is not overwritten by the reply.
+  async function autosave() {
+    if (!currentRun || !isDirty() || isBusy()) return;
+    if (autosaving) return autosaving;
+    const sent = snapshotOf(currentRun);
+    const id = currentRun.id;
+    renderSaveState('Saving…');
+    autosaving = (async () => {
+      try {
+        const saved = await api(`/runs/${id}?autosave=1`, { method: 'PUT', body: JSON.stringify(currentRun) });
+        if (currentRun && currentRun.id === id) {
+          currentRun.quality = saved.quality;
+          savedSnapshot = sent;
+          renderQuality();
+        }
+      } catch {
+        renderSaveState('Could not save — will retry');
+      } finally {
+        autosaving = null;
+        renderSaveState();
+        if (isDirty()) scheduleAutosave(); // typed more while it was saving
+      }
+    })();
+    return autosaving;
+  }
+
+  function scheduleAutosave() {
+    renderSaveState();
+    clearTimeout(autosaveTimer);
+    autosaveTimer = setTimeout(autosave, AUTOSAVE_DELAY_MS);
+  }
+
+  // Anything saved first, so the next step works from what the user sees.
+  async function ensureSaved() {
+    clearTimeout(autosaveTimer);
+    if (autosaving) await autosaving;
+    if (isDirty() && !isBusy()) await autosave();
+  }
+
+  ['input', 'change', 'click'].forEach((evt) => {
+    resultsPanel.addEventListener(evt, () => {
+      if (currentRun && savedSnapshot !== null) setTimeout(scheduleAutosave, 0); // after the handler has updated the run
+    });
+  });
+
+  window.addEventListener('beforeunload', (e) => {
+    if (!isDirty()) return;
+    // Best effort for small runs (the browser caps a keepalive body at 64 KB), plus the warning.
+    try {
+      fetch(`/api/runs/${currentRun.id}?autosave=1`, {
+        method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(currentRun), keepalive: true,
+      }).catch(() => {});
+    } catch { /* too large for keepalive — the warning below still shows */ }
+    e.preventDefault();
+    e.returnValue = '';
+  });
+
+  const download = async (path) => {
+    await ensureSaved();
+    window.location.href = `/api/runs/${currentRun.id}/${path}`;
+  };
+
+  exportBtn.addEventListener('click', () => download('export'));
+
+  el('exportXlsxBtn').addEventListener('click', () => download('export.xlsx'));
+  el('exportPdfBtn').addEventListener('click', () => download('export.pdf'));
 
   exportToggle.addEventListener('click', (e) => {
     e.stopPropagation();
@@ -2296,13 +2525,9 @@
     if (!e.target.closest('.export-menu')) exportOptions.classList.add('hidden');
   });
 
-  el('exportShareBtn').addEventListener('click', () => {
-    window.location.href = `/api/runs/${currentRun.id}/export.json`;
-  });
+  el('exportShareBtn').addEventListener('click', () => download('export.json'));
 
-  el('exportTraceBtn').addEventListener('click', () => {
-    window.location.href = `/api/runs/${currentRun.id}/traceability.xlsx`;
-  });
+  el('exportTraceBtn').addEventListener('click', () => download('traceability.xlsx'));
 
   // ---------- Fill coverage gaps ----------
   const fillGapsBtn = el('fillGapsBtn');
@@ -2323,6 +2548,7 @@
     gapLog.reset();
 
     try {
+      await ensureSaved(); // the server adds to the saved copy, so it must match the screen
       const res = await fetch(`/api/runs/${currentRun.id}/fill-gaps`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -2339,6 +2565,7 @@
           renderScenarios();
           renderCoverage();
           loadVersions();
+          markClean();
         },
         onFailed: (p) => {
           gapLog.log(p.error, 'failed');

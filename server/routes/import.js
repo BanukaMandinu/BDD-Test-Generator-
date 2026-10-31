@@ -8,6 +8,7 @@ const { normalizeExamples, placeholdersInStep } = require('../lib/placeholders')
 const { normalizeDataTable } = require('../lib/claudeCli');
 const quality = require('../lib/quality');
 const audit = require('../lib/audit');
+const { originFromUrl } = require('../lib/session');
 
 const router = express.Router();
 
@@ -79,6 +80,39 @@ function sanitizeScenario(raw, requirementIdByIndex, validTypeIds) {
   };
 }
 
+// Said out loud, because a silent cut means someone ships a suite they believe is
+// complete: what the size limits dropped, and what was skipped for having no steps.
+function capWarnings(rawScenarios, keptCount) {
+  const list = Array.isArray(rawScenarios) ? rawScenarios : [];
+  const considered = list.slice(0, MAX_SCENARIOS);
+  const warnings = [];
+  const plural = (n, word) => `${n} ${word}${n === 1 ? '' : 's'}`;
+
+  if (list.length > MAX_SCENARIOS) {
+    warnings.push(`The file has ${list.length} test cases; only the first ${MAX_SCENARIOS} were imported.`);
+  }
+  const noSteps = considered.length - keptCount;
+  if (noSteps > 0) {
+    warnings.push(`${plural(noSteps, 'test case')} had no usable steps and ${noSteps === 1 ? 'was' : 'were'} skipped.`);
+  }
+  const tooManySteps = considered.filter((s) => Array.isArray(s?.steps) && s.steps.length > MAX_STEPS_PER_SCENARIO).length;
+  if (tooManySteps) {
+    warnings.push(`${plural(tooManySteps, 'test case')} had more than ${MAX_STEPS_PER_SCENARIO} steps; the steps after that were dropped.`);
+  }
+  const tooManyRows = considered.filter((s) => Array.isArray(s?.examples) && s.examples.length > MAX_TABLE_ROWS).length;
+  if (tooManyRows) {
+    warnings.push(`${plural(tooManyRows, 'Examples table')} had more than ${MAX_TABLE_ROWS} rows; the rows after that were dropped.`);
+  }
+  return warnings;
+}
+
+// A shared file may carry the run's website link. Only a plain http(s) link is kept.
+function cleanSourceUrl(value) {
+  const raw = typeof value === 'string' ? value.trim() : '';
+  if (!raw || !originFromUrl(raw)) return null;
+  return (/^https?:\/\//i.test(raw) ? raw : `https://${raw}`).slice(0, 2000);
+}
+
 function buildFromJson(parsed) {
   const rawReqs = Array.isArray(parsed.requirements) ? parsed.requirements.slice(0, MAX_SCENARIOS) : [];
 
@@ -110,10 +144,11 @@ function buildFromJson(parsed) {
   return {
     featureTitle: String(parsed.featureTitle ?? 'Imported feature').slice(0, 500),
     featureDescription: String(parsed.featureDescription ?? '').slice(0, 2000),
+    sourceUrl: cleanSourceUrl(parsed.sourceUrl),
     requirements,
     scenarios,
     selectedTypes: types.map((t) => t.id),
-    warnings: [],
+    warnings: capWarnings(parsed.scenarios, scenarios.length),
   };
 }
 
@@ -141,7 +176,7 @@ function buildFromParsed(parsed, notice) {
     // Only claim the types the file actually carries; otherwise the coverage
     // check would report every default type as "missing".
     selectedTypes: typesPresent,
-    warnings: [...parsed.warnings, notice],
+    warnings: [...parsed.warnings, ...capWarnings(parsed.scenarios, scenarios.length), notice],
   };
 }
 
@@ -232,7 +267,7 @@ router.post('/import', async (req, res, next) => {
       input: xlsx
         ? `Imported from ${filename}, sheet "${built.featureTitle}"`
         : `Imported from ${filename || 'a shared file'}`,
-      sourceUrl: null,
+      sourceUrl: built.sourceUrl || null,
       importedFrom: filename || null,
       importedAt: new Date().toISOString(),
       exploredInteractively: false,

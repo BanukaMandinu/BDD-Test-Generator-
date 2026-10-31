@@ -62,6 +62,26 @@ function loadWhenReady(win, attempt = 0) {
   });
 }
 
+// An installed copy must not keep the user's test cases inside its own install
+// folder: every update deletes and rewrites that folder, and their runs, history
+// and saved sign-in went with it. Keep them in the user's profile instead.
+// Anything an earlier version left in the old place is copied across once.
+function useUserDataFolder() {
+  const dataDir = process.env.BDD_DATA_DIR || path.join(app.getPath('userData'), 'data');
+  process.env.BDD_DATA_DIR = dataDir;
+  fs.mkdirSync(dataDir, { recursive: true });
+
+  const legacyRuns = path.join(PROJECT_ROOT, 'data', 'runs');
+  const newRuns = path.join(dataDir, 'runs');
+  try {
+    const hasLegacy = fs.existsSync(legacyRuns) && fs.readdirSync(legacyRuns).length > 0;
+    const hasNew = fs.existsSync(newRuns) && fs.readdirSync(newRuns).length > 0;
+    if (hasLegacy && !hasNew) fs.cpSync(path.join(PROJECT_ROOT, 'data'), dataDir, { recursive: true });
+  } catch (err) {
+    console.error('Could not copy earlier test cases:', err.message);
+  }
+}
+
 function createWindow() {
   const win = new BrowserWindow({
     width: 1280,
@@ -74,6 +94,22 @@ function createWindow() {
     },
   });
   Menu.setApplicationMenu(null);
+
+  // The page warns before it is left with unsaved edits (beforeunload). Electron
+  // blocks that silently unless something answers, which would leave the window
+  // impossible to close — so ask the user here.
+  win.webContents.on('will-prevent-unload', (event) => {
+    const choice = dialog.showMessageBoxSync(win, {
+      type: 'warning',
+      buttons: ['Leave', 'Stay'],
+      defaultId: 1,
+      cancelId: 1,
+      title: 'Unsaved changes',
+      message: 'You have changes that are not saved yet.',
+      detail: 'Changes are saved automatically a few seconds after you stop typing. Leave anyway?',
+    });
+    if (choice === 0) event.preventDefault(); // preventDefault here means: go ahead and leave
+  });
 
   // Links to other sites (e.g. "open your site" in the sign-in steps) must open in
   // the user's real browser — that is where they are signed in — not in this window.
@@ -100,6 +136,7 @@ app.whenReady().then(async () => {
   // Another launch (start.bat, or a second copy of this app) may already be
   // serving this port — reuse it instead of crashing on EADDRINUSE.
   if (!(await isPortOpen(PORT))) {
+    if (app.isPackaged) useUserDataFolder();
     require(path.join(PROJECT_ROOT, 'server', 'index.js'));
   }
 

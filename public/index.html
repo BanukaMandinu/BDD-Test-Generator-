@@ -26,6 +26,7 @@
     <h1>BDD Test Generator</h1>
     <div class="header-actions">
       <button id="themeToggle" class="icon-btn" type="button" aria-label="Toggle dark mode" title="Toggle dark mode">🌙</button>
+      <input id="runFilter" type="search" class="run-filter" placeholder="Filter runs…" aria-label="Filter runs" autocomplete="off" />
       <select id="runSelect" aria-label="Previous runs">
         <option value="">New run</option>
       </select>
@@ -49,9 +50,11 @@
         <button id="generateBtn" class="primary big" title="Write tests straight from what you typed above">Generate tests</button>
         <button id="discoverBtn" class="secondary" title="Map the site's pages, then pick which to cover">Explore site</button>
         <button id="recordBtn" class="secondary" title="Open a real browser, click through it yourself, and write tests from exactly what you did">Record a flow</button>
+        <button id="codegenBtn" class="secondary" title="Already recorded with Playwright's codegen (VS Code extension or npx playwright codegen)? Import the script and write tests from it">Import a codegen script</button>
+        <input type="file" id="codegenFile" accept=".js,.ts,.mjs,.cjs,.py,.txt" hidden />
         <span id="generateStatus" class="status"></span>
       </div>
-      <p class="start-hint"><strong>Explore site</strong> maps the pages so you can pick which to cover. <strong>Record a flow</strong> lets you click through by hand — best for Google/SSO sign-in.</p>
+      <p class="start-hint"><strong>Explore site</strong> maps the pages so you can pick which to cover. <strong>Record a flow</strong> lets you click through by hand — best for Google/SSO sign-in. <strong>Import a codegen script</strong> turns a Playwright codegen recording (.js, .ts or .py) into test cases.</p>
 
       <!-- Page picker, shown after a discovery crawl. -->
       <div id="pagePicker" class="card hidden">
@@ -243,6 +246,8 @@
           <label for="versionSelect">History</label>
           <select id="versionSelect"><option value="">Current</option></select>
           <span id="diffSummary" class="status"></span>
+          <button id="restoreVersionBtn" class="link-btn hidden" title="Put this run back to the version selected. What it is now is saved to History first.">Restore this version</button>
+          <button id="deleteRunBtn" class="link-btn danger-link" title="Delete this run and its history">Delete this run</button>
         </div>
         <div id="diffPanel" class="card hidden"></div>
 
@@ -261,6 +266,10 @@
             <label class="toggle-line" for="checkWebsiteToggle">
               <input type="checkbox" id="checkWebsiteToggle" />
               <span>Go through the website while updating <span class="muted-text">— compares each test case with the real pages, updates what's wrong, flags what isn't there, adds what's missing</span></span>
+            </label>
+            <label class="toggle-line" for="allowClicksToggle">
+              <input type="checkbox" id="allowClicksToggle" />
+              <span>Let it click through the site <span class="muted-text">— so it can open pages behind buttons like "Enter Classroom". <strong>Test or dev sites only.</strong> It cannot type, and it is told never to press Delete, Save or Submit, but that is an instruction, not a lock.</span></span>
             </label>
             <label class="toggle-line" for="bulkSessionToggle">
               <input type="checkbox" id="bulkSessionToggle" />
@@ -289,6 +298,7 @@
         <div class="actions-row action-bar">
           <button id="addScenarioBtn" class="secondary">+ Add scenario</button>
           <button id="saveRunBtn" class="primary">Save changes</button>
+          <span id="saveState" class="save-state" aria-live="polite"></span>
 
           <span class="export-menu">
             <button id="exportToggle" class="secondary">Download ▾</button>
@@ -298,6 +308,9 @@
               </button>
               <button id="exportXlsxBtn" class="export-option">
                 <strong>Excel</strong><span>Test-case sheet in the team layout</span>
+              </button>
+              <button id="exportPdfBtn" class="export-option">
+                <strong>PDF</strong><span>Printable test-case document</span>
               </button>
               <button id="exportTraceBtn" class="export-option">
                 <strong>Traceability matrix</strong><span>Requirement ↔ test case, for audit</span>

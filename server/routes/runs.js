@@ -1,6 +1,6 @@
 const crypto = require('crypto');
 const express = require('express');
-const { loadRun, saveRun, listRuns } = require('../lib/store');
+const { loadRun, saveRun, listRuns, deleteRun } = require('../lib/store');
 const {
   reviseScenario,
   describeScenario,
@@ -35,6 +35,8 @@ const MAX_REVIEW_LENGTH = 2000;
 // How many test cases are rewritten at once by the Fix button. Each one is its own
 // model call, so this trades speed against how many the machine runs in parallel.
 const FIX_CONCURRENCY = 3;
+// An autosave adds a History entry only if the newest one is older than this.
+const AUTOSAVE_HISTORY_GAP_MS = 10 * 60 * 1000;
 
 function getRunOr404(req, res) {
   const run = loadRun(req.params.id);
@@ -93,7 +95,19 @@ router.put('/runs/:id', (req, res, next) => {
       }
     }
 
-    versions.snapshot(existing, 'manual edit');
+    // Autosave runs every few seconds while someone types; it must not bury the
+    // history in near-identical entries. An explicit save always adds one; autosave
+    // adds one only when the last entry is old, so a long editing session still
+    // leaves checkpoints to go back to.
+    const isAutosave = req.query.autosave === '1';
+    if (!isAutosave) {
+      versions.snapshot(existing, 'manual edit');
+    } else {
+      const lastAt = versions.list(existing.id)[0]?.at;
+      if (!lastAt || Date.now() - new Date(lastAt).getTime() > AUTOSAVE_HISTORY_GAP_MS) {
+        versions.snapshot(existing, 'autosave');
+      }
+    }
 
     // Ticks and edits change what the checks see, so re-run them on every save.
     updated.quality = quality.inspect(updated);
@@ -496,6 +510,47 @@ router.get('/runs/:id/versions/:versionId/diff', (req, res, next) => {
   }
 });
 
+// Puts the run back to what a stored version held. The state being replaced is
+// snapshotted first, so a restore can itself be undone from History.
+router.post('/runs/:id/versions/:versionId/restore', (req, res, next) => {
+  try {
+    const run = getRunOr404(req, res);
+    if (!run) return;
+
+    const version = versions.load(run.id, req.params.versionId);
+    if (!version) return res.status(404).json({ error: 'version not found' });
+
+    versions.snapshot(run, `before restoring ${version.action || 'an earlier version'}`);
+
+    run.featureTitle = version.featureTitle;
+    run.featureDescription = version.featureDescription;
+    run.requirements = version.requirements || [];
+    run.scenarios = version.scenarios || [];
+
+    run.quality = quality.inspect(run);
+    saveRun(run);
+    audit.record('restore-version', { runId: run.id, detail: version.versionId });
+    res.json(run);
+  } catch (err) {
+    next(err);
+  }
+});
+
+// Deletes a run and its history. The UI asks first; this cannot be undone.
+router.delete('/runs/:id', (req, res, next) => {
+  try {
+    const run = getRunOr404(req, res);
+    if (!run) return;
+
+    deleteRun(run.id);
+    versions.removeAll(run.id);
+    audit.record('delete-run', { runId: run.id, detail: `${run.scenarios.length} scenarios` });
+    res.json({ deleted: true });
+  } catch (err) {
+    next(err);
+  }
+});
+
 // Universal update: applies one review note across the whole feature in a single
 // pass, so the wording stays consistent and no duplicate scenarios appear. Only
 // ticked scenarios take part, and inside them only ticked steps may be rewritten.
@@ -535,6 +590,8 @@ router.post('/runs/:id/update-all', async (req, res) => {
     // ref is the scenario's 1-based position in the batch we send; the model
     // echoes it back so we can map each revision to the right scenario.
     const checkWebsite = req.body?.checkWebsite === true && Boolean(run.sourceUrl);
+    // Clicking is opt-in per run of the check, and only means anything with a website.
+    const allowClicks = checkWebsite && req.body?.allowClicks === true;
     const refToScenario = new Map();
     const formattedScenarios = targets
       .map((scenario, i) => {
@@ -554,6 +611,7 @@ router.post('/runs/:id/update-all', async (req, res) => {
       review,
       url: checkWebsite ? run.sourceUrl : null,
       useSession: checkWebsite && req.body?.useSession === true,
+      allowClicks,
       onProgress: (message) => send('progress', { message }),
     });
 
@@ -613,7 +671,7 @@ router.post('/runs/:id/update-all', async (req, res) => {
     saveRun(run);
     audit.record('update-all', {
       runId: run.id,
-      detail: `${updatedCount} revised, ${added.length} added${flaggedCount ? `, ${flaggedCount} flagged for removal` : ''}${checkWebsite ? ' (checked against website)' : ''}`,
+      detail: `${updatedCount} revised, ${added.length} added${flaggedCount ? `, ${flaggedCount} flagged for removal` : ''}${checkWebsite ? ` (checked against website${allowClicks ? ', clicking allowed' : ''})` : ''}`,
     });
 
     const changedCount = [...outcomes.values()].filter((o) => o.changed && !o.flagged).length;

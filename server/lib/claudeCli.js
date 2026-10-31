@@ -139,6 +139,14 @@ const READONLY_BROWSER_TOOLS = [
   'mcp__playwright__browser_close',
 ];
 
+// The website check's "click through" mode: look, plus click and go back. No typing,
+// no forms, no selecting — it can move around a site but not fill anything in.
+const CLICK_THROUGH_BROWSER_TOOLS = [
+  ...READONLY_BROWSER_TOOLS,
+  'mcp__playwright__browser_click',
+  'mcp__playwright__browser_navigate_back',
+];
+
 const INTERACTIVE_BROWSER_TOOLS = [
   ...READONLY_BROWSER_TOOLS,
   'mcp__playwright__browser_click',
@@ -558,7 +566,7 @@ async function generateScenarioFromTitle({ title, featureTitle, featureDescripti
 // With a url, the model also browses the live site (read-only) and audits the
 // suite against it — updating, flagging and adding test cases. Without one it is
 // the plain text-only pass it always was.
-async function reviseAllScenarios({ featureTitle, featureDescription, requirements, formattedScenarios, review, url = null, useSession = false, onProgress }) {
+async function reviseAllScenarios({ featureTitle, featureDescription, requirements, formattedScenarios, review, url = null, useSession = false, allowClicks = false, onProgress }) {
   const userPrompt = buildUpdateAllUserPrompt({
     featureTitle,
     featureDescription,
@@ -566,15 +574,16 @@ async function reviseAllScenarios({ featureTitle, featureDescription, requiremen
     formattedScenarios,
     review,
     url,
+    allowClicks,
   });
   if (!url) {
     const result = await runClaude({ userPrompt, browserTools: [], onProgress });
     return parseJsonLoose(result);
   }
-  if (onProgress) onProgress(`Exploring ${url}${useSession && hasSavedSession() ? ' with your saved sign-in' : ''}`);
+  if (onProgress) onProgress(`Exploring ${url}${useSession && hasSavedSession() ? ' with your saved sign-in' : ''}${allowClicks ? ', clicking through (test site only)' : ''}`);
   const result = await runClaude({
     userPrompt,
-    browserTools: READONLY_BROWSER_TOOLS,
+    browserTools: allowClicks ? CLICK_THROUGH_BROWSER_TOOLS : READONLY_BROWSER_TOOLS,
     onProgress,
     useSession,
     timeoutMs: Math.min(CLI_TIMEOUT_MS * 2, MAX_TIMEOUT_MS),

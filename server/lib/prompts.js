@@ -607,12 +607,18 @@ const UPDATE_ALL_SCHEMA = `{
 // Appended when the run has a website to check against. It turns "apply this
 // note" into "audit the suite against the real site", which is what a reviewer
 // means by "go through the website and fix the test cases".
-function buildWebsiteCheckInstructions(url) {
+// Only when the reviewer ticked "let it click through" for a test site. It is an
+// instruction, not a lock: the tool set below it can click and go back, nothing
+// that types or submits, but a click on the wrong button is still a click.
+const CLICK_THROUGH_RULES = `You MAY click to move around the site, but only controls that open or show something: links, tabs, menu items, and buttons like Enter, Open, Start, Next, Previous, Back, Expand. After each click, take a new snapshot.
+You must NEVER click anything that could change data or have a side effect — Delete, Remove, Save, Submit, Send, Publish, Pay, Buy, Confirm, Approve, Reset, Create, Add, Upload, Sign out, Log out — and you must not type into any field. If you are not sure what a button does, do not click it; say in "note" that you left that part unchecked.`;
+
+function buildWebsiteCheckInstructions(url, { allowClicks = false } = {}) {
   return `The reviewer also wants these test cases CHECKED AGAINST THE LIVE WEBSITE: ${url}
 
 ${EXPLORE_INSTRUCTIONS}
 
-Visit the site and follow its main navigation to the areas these test cases are about (stay on the same site, read-only — never click anything that changes data). Then audit the whole suite against what you actually saw:
+${allowClicks ? `Visit the site and move through it to the areas these test cases are about (stay on the same site). ${CLICK_THROUGH_RULES}` : 'Visit the site and follow its main navigation to the areas these test cases are about (stay on the same site, read-only — never click anything that changes data).'} Then audit the whole suite against what you actually saw:
 - UPDATE a scenario whose steps no longer match the real page (a different label, button text, field, order of steps, or message). Use the exact wording you saw.
 - REMOVE (set "remove": true and give a "removeReason") a scenario only when you looked for the thing it covers and it is clearly not on the site. When unsure, keep it. Never remove a scenario just because you could not reach that part of the site.
 - ADD a scenario (omit "ref") for a meaningful feature you saw on the site that nothing in the suite covers. Do not add generic "page loads" scenarios, and do not duplicate an existing one.
@@ -621,7 +627,7 @@ Visit the site and follow its main navigation to the areas these test cases are 
 - Anything unticked ([KEEP] steps) still follows the rules below.`;
 }
 
-function buildUpdateAllUserPrompt({ featureTitle, featureDescription, requirements, formattedScenarios, review, url }) {
+function buildUpdateAllUserPrompt({ featureTitle, featureDescription, requirements, formattedScenarios, review, url, allowClicks = false }) {
   const reqLines = requirements.map((r, i) => `${i + 1}. ${r.text}`).join('\n');
   return `A QA reviewer left one piece of feedback that should be applied across a whole feature's test cases at once. Revise every scenario below so the feedback is reflected consistently throughout.
 
@@ -637,7 +643,7 @@ ${formattedScenarios}
 Reviewer feedback to apply across all of them:
 "${review}"
 
-${url ? buildWebsiteCheckInstructions(url) + '\n\n' : ''}${KEEP_RULES}
+${url ? buildWebsiteCheckInstructions(url, { allowClicks }) + '\n\n' : ''}${KEEP_RULES}
 
 Additional rules for a whole-feature update:
 - Return EVERY scenario you were given, each echoing back the exact "ref" number it was given. Do not drop or merge scenarios (to propose deleting one, keep it in the list with "remove": true — and only when a live website was checked).

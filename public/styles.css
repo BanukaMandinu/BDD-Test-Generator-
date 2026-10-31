@@ -560,6 +560,16 @@ kbd {
 .fix-btn.primary-fix:hover { background: var(--primary-hover); }
 .fix-btn.hidden { display: none; }
 #fixLog ul { max-height: 260px; }
+
+/* Run list: a filter box beside the picker, and delete / restore beside History. */
+.run-filter { width: 150px; padding: 6px 10px; font-size: 12px; border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--surface); color: var(--text); }
+.history-bar .link-btn.hidden { display: none; }
+.history-bar .danger-link { margin-left: auto; color: var(--danger); }
+.history-bar .danger-link:hover { border-color: var(--danger); color: var(--danger); background: var(--danger-bg); }
+
+/* Shows whether what is on screen is saved. */
+.save-state { font-size: 11.5px; color: var(--faint); min-width: 110px; }
+.save-state.unsaved { color: var(--warn-text); font-weight: 600; }
 .notice-list li.severity-error::before { color: var(--danger); }
 
 .quality-metrics { display: flex; gap: 14px; flex-wrap: wrap; margin-top: 8px; padding-top: 8px; border-top: 1px solid var(--border); font-size: 11px; color: var(--muted); }

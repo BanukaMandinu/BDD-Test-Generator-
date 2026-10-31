@@ -15,11 +15,9 @@
 const fs = require('fs');
 const path = require('path');
 
-const PROJECT_ROOT = path.join(__dirname, '..', '..');
-const DATA_DIR = path.join(PROJECT_ROOT, 'data');
+const { DATA_DIR, PROFILE_DIR } = require('./paths');
 const STORAGE_STATE_PATH = path.join(DATA_DIR, 'storage-state.json');
-// The full browser profile `npm run login` builds by driving a real sign-in.
-const PROFILE_DIR = path.join(PROJECT_ROOT, '.browser-profile');
+// PROFILE_DIR is the full browser profile `npm run login` / the sign-in window builds.
 const MAX_PASTE_BYTES = 1024 * 1024;
 
 function hasLoginProfile() {

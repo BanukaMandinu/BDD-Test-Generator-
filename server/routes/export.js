@@ -2,6 +2,7 @@ const express = require('express');
 const { loadRun } = require('../lib/store');
 const { toFeatureText, slugify } = require('../lib/gherkin');
 const { buildWorkbook, buildTraceabilityWorkbook } = require('../lib/excel');
+const { renderPdf } = require('../lib/pdf');
 
 const router = express.Router();
 
@@ -38,9 +39,13 @@ router.get('/runs/:id/export.json', (req, res) => {
     exportedAt: new Date().toISOString(),
     featureTitle: run.featureTitle,
     featureDescription: run.featureDescription,
+    // Kept so a colleague can run the website check without finding the link again.
+    sourceUrl: run.sourceUrl || null,
     selectedTypes: run.selectedTypes || [],
     requirements: run.requirements,
     scenarios: run.scenarios.map((s) => ({
+      // The tracker's own ID (TC-02 stays TC-02) — without it the colleague's Excel renumbers everything.
+      testId: s.testId || null,
       title: s.title,
       description: s.description || null,
       testType: s.testType,
@@ -78,6 +83,24 @@ router.get('/runs/:id/export.xlsx', async (req, res, next) => {
 });
 
 // Traceability matrix alone — the artifact an auditor usually asks for.
+// A printable document of the ticked test cases, with the same IDs as the Excel.
+router.get('/runs/:id/export.pdf', async (req, res, next) => {
+  try {
+    const run = getRunOr404(req, res);
+    if (!run) return;
+    if (!run.scenarios.some((s) => s.included !== false)) {
+      return res.status(400).json({ error: 'No test cases are ticked, so there is nothing to put in the PDF.' });
+    }
+
+    const pdf = await renderPdf(run);
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `attachment; filename="${slugify(run.featureTitle)}-test-cases.pdf"`);
+    res.send(Buffer.from(pdf));
+  } catch (err) {
+    next(err);
+  }
+});
+
 router.get('/runs/:id/traceability.xlsx', async (req, res, next) => {
   try {
     const run = getRunOr404(req, res);

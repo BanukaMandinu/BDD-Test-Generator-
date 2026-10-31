@@ -103,9 +103,16 @@ function parseFeature(text) {
     inExamples = false;
   };
 
+  let pendingTestId = null;   // from a "# Test ID: X" comment, for the next scenario
+
   for (const raw of lines) {
     const line = raw.trim();
-    if (!line || isComment(line)) continue;
+    if (!line) continue;
+    if (isComment(line)) {
+      const id = /^#\s*test id:\s*(.+)$/i.exec(line);
+      if (id) pendingTestId = id[1].trim().slice(0, 40);
+      continue;
+    }
 
     // ---- Tags ----
     if (line.startsWith('@')) {
@@ -151,6 +158,7 @@ function parseFeature(text) {
       const outline = /outline|template/i.test(scenario.keyword);
       current = {
         id: crypto.randomUUID(),
+        ...(pendingTestId ? { testId: pendingTestId } : {}),
         title: scenario.rest,
         testType: tagsToType(pendingTags),
         included: true,
@@ -162,6 +170,7 @@ function parseFeature(text) {
       };
       background = background || null;
       pendingTags = [];
+      pendingTestId = null;
       continue;
     }
 
@@ -215,6 +224,13 @@ function parseFeature(text) {
       }
       lastStep = newStep(step.keyword, step.text);
       current.steps.push(lastStep);
+      continue;
+    }
+
+    // ---- Free text between a Scenario line and its first step is that test case's description ----
+    if (current && !lastStep && !inExamples) {
+      const text = line.replace(/^precondition:\s*/i, '');
+      current.description = [current.description, text].filter(Boolean).join(' ').slice(0, 2000);
       continue;
     }
 

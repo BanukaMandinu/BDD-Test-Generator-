@@ -1,5 +1,6 @@
 const express = require('express');
 const recorder = require('../lib/recorder');
+const { parseCodegen } = require('../lib/codegenImport');
 const audit = require('../lib/audit');
 
 const router = express.Router();
@@ -26,6 +27,20 @@ router.post('/record/start', async (req, res) => {
   } catch (err) {
     console.error('record start failed:', err.message);
     res.status(err.status || 500).json({ error: err.message });
+  }
+});
+
+// Reads a Playwright codegen script (VS Code extension or `npx playwright codegen`)
+// into the same flows a live recording produces. Nothing in the script is run.
+router.post('/codegen/parse', (req, res) => {
+  const content = typeof req.body?.content === 'string' ? req.body.content : '';
+  const filename = String(req.body?.filename ?? '').slice(0, 260);
+  try {
+    const { flows, warnings } = parseCodegen(content, filename);
+    audit.record('codegen-import', { detail: `${flows.length} flow(s) from ${filename || 'a script'}` });
+    res.json({ flows, warnings });
+  } catch (err) {
+    res.status(400).json({ error: err.message });
   }
 });
 

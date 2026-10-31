@@ -1,7 +1,7 @@
 const fs = require('fs');
 const path = require('path');
 
-const DATA_DIR = path.join(__dirname, '..', '..', 'data');
+const { DATA_DIR } = require('./paths');
 const RUNS_DIR = path.join(DATA_DIR, 'runs');
 
 function ensureDirs() {
@@ -49,4 +49,12 @@ function listRuns() {
     .sort((a, b) => new Date(b.updatedAt) - new Date(a.updatedAt));
 }
 
-module.exports = { saveRun, loadRun, listRuns, DATA_DIR };
+// Removes the run's file. Returns false when there was no such run.
+function deleteRun(id) {
+  const file = runPath(id);
+  if (!fs.existsSync(file)) return false;
+  fs.unlinkSync(file);
+  return true;
+}
+
+module.exports = { saveRun, loadRun, listRuns, deleteRun, DATA_DIR };

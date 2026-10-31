@@ -14,7 +14,7 @@ const path = require('path');
 const readline = require('readline');
 const { chromium } = require('playwright-core');
 
-const PROFILE_DIR = path.join(__dirname, '..', '.browser-profile');
+const { PROFILE_DIR } = require('../server/lib/paths');
 
 function parseArgs(argv) {
   const args = argv.slice(2).filter((a) => a !== '--');

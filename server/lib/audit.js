@@ -1,7 +1,8 @@
 const fs = require('fs');
 const path = require('path');
 
-const AUDIT_LOG = path.join(__dirname, '..', '..', 'data', 'audit.log');
+const { DATA_DIR } = require('./paths');
+const AUDIT_LOG = path.join(DATA_DIR, 'audit.log');
 
 // Append-only audit trail of who did what, when. Never logs requirement/scenario
 // content itself (that may be sensitive) — only the action, run id, and actor.

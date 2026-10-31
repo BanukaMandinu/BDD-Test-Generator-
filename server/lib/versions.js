@@ -1,7 +1,8 @@
 const fs = require('fs');
 const path = require('path');
 
-const VERSIONS_DIR = path.join(__dirname, '..', '..', 'data', 'versions');
+const { DATA_DIR } = require('./paths');
+const VERSIONS_DIR = path.join(DATA_DIR, 'versions');
 const MAX_VERSIONS_PER_RUN = 50;
 
 function safeId(id) {
@@ -64,7 +65,10 @@ function list(runId) {
 }
 
 function load(runId, versionId) {
-  const file = path.join(runDir(runId), `${safeId(versionId)}.json`);
+  // An id that is not a plain id (a path, say) names nothing, so it is "not found".
+  let name;
+  try { name = safeId(versionId); } catch { return null; }
+  const file = path.join(runDir(runId), `${name}.json`);
   if (!fs.existsSync(file)) return null;
   return JSON.parse(fs.readFileSync(file, 'utf8'));
 }
@@ -143,4 +147,9 @@ function diff(version, run) {
   };
 }
 
-module.exports = { snapshot, list, load, diff };
+// Deletes a run's whole history (used when the run itself is deleted).
+function removeAll(runId) {
+  fs.rmSync(runDir(runId), { recursive: true, force: true });
+}
+
+module.exports = { snapshot, list, load, diff, removeAll };

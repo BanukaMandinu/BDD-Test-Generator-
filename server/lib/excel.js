@@ -239,4 +239,4 @@ async function buildTraceabilityWorkbook(run) {
   return workbook.xlsx.writeBuffer();
 }
 
-module.exports = { buildWorkbook, buildTraceabilityWorkbook, tagForType };
+module.exports = { buildWorkbook, buildTraceabilityWorkbook, tagForType, idPrefix, includedScenarios, PRIORITY_BY_TYPE };

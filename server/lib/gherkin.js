@@ -35,6 +35,8 @@ function dataTableLines(table, indent) {
   });
 }
 
+const oneLine = (text) => String(text ?? '').replace(/\s*\r?\n\s*/g, ' ').trim();
+
 function toFeatureText(run) {
   const lines = [`Feature: ${run.featureTitle}`];
   if (run.featureDescription) lines.push(`  ${run.featureDescription}`);
@@ -57,6 +59,10 @@ function toFeatureText(run) {
       lastPage = scenario.page;
     }
 
+    // The tracker's ID rides along as a comment: the file stays valid Gherkin and
+    // the importer reads it back, so TC-02 is still TC-02 after a round trip.
+    if (scenario.testId) lines.push(`  # Test ID: ${oneLine(scenario.testId)}`);
+
     const tag = tagForType(scenario.testType);
     if (tag) lines.push(`  ${tag}`);
 
@@ -64,6 +70,11 @@ function toFeatureText(run) {
     // with no placeholders (or no Examples rows) is invalid Gherkin.
     const outline = isOutline(scenario) && exampleRowCount(scenario) > 0;
     lines.push(`  ${outline ? 'Scenario Outline' : 'Scenario'}: ${scenario.title}`);
+
+    // A description is free text under the Scenario line, which Cucumber's reports
+    // show. The "Precondition:" prefix keeps a description that begins with "Given"
+    // or "@" from being read back as a step or a tag.
+    if (scenario.description) lines.push(`    Precondition: ${oneLine(scenario.description)}`);
 
     for (const step of scenario.steps) {
       if (step.included === false) continue;

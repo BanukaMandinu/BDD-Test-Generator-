@@ -1272,6 +1272,205 @@ async function excelImportTests() {
   });
 }
 
+group('.feature export — Test ID and description round-trip', () => {
+  const { toFeatureText } = require('../server/lib/gherkin');
+  const { parseFeature } = require('../server/lib/featureParser');
+  const run = (extra) => ({
+    featureTitle: 'F', featureDescription: '',
+    scenarios: [scenario('a', 'Open it', [step('1', 'Given', 'a page'), step('2', 'Then', 'it loads')], extra)],
+  });
+
+  test('the Test ID and description are written, and read back', () => {
+    const text = toFeatureText(run({ testId: 'TC-07', description: 'The Instructor is signed in' }));
+    assert.match(text, /# Test ID: TC-07/);
+    assert.match(text, /Precondition: The Instructor is signed in/);
+    const [s] = parseFeature(text).scenarios;
+    assert.strictEqual(s.testId, 'TC-07');
+    assert.strictEqual(s.description, 'The Instructor is signed in');
+    assert.strictEqual(s.steps.length, 2, 'the description is not mistaken for a step');
+  });
+
+  test('a description that starts like a step or a tag is not read back as one', () => {
+    for (const description of ['Given the user is signed in', '@admin only', '| a | b |', 'Then it works']) {
+      const [s] = parseFeature(toFeatureText(run({ description }))).scenarios;
+      assert.strictEqual(s.description, description);
+      assert.strictEqual(s.steps.length, 2, `"${description}" must not become a step`);
+    }
+  });
+
+  test('a multi-line description is written on one line', () => {
+    const text = toFeatureText(run({ description: 'Line one\nGiven line two' }));
+    assert.match(text, /Precondition: Line one Given line two/);
+    assert.strictEqual(parseFeature(text).scenarios[0].steps.length, 2);
+  });
+
+  test('a file with neither is unchanged from before', () => {
+    const text = toFeatureText(run({}));
+    assert.ok(!/Test ID|Precondition/.test(text));
+  });
+
+  test('a Test ID comment does not leak onto the next scenario', () => {
+    const [a, b] = parseFeature('Feature: F\n  # Test ID: X-1\n  Scenario: A\n    Given a\n  Scenario: B\n    Given b\n').scenarios;
+    assert.strictEqual(a.testId, 'X-1');
+    assert.ok(!b.testId);
+  });
+});
+
+group('codegen import — Playwright scripts to recorded flows', () => {
+  const { parseCodegen } = require('../server/lib/codegenImport');
+  const js = `
+test('Instructor signs in', async ({ page }) => {
+  await page.goto('https://app.example.com/login');
+  await page.getByLabel('Email').fill('ann@example.com');
+  await page.getByLabel('Password').fill('S3cr3tPassw0rd!');
+  await page
+    .getByRole('button', { name: 'Sign in' })
+    .click();
+  await expect(page.getByRole('heading', { name: 'Instructor Portal' })).toBeVisible();
+  await expect(page).toHaveURL(/portal/);
+});
+test('Second', async ({ page }) => {
+  await page.goto('https://app.example.com/');
+  await page.getByRole('checkbox', { name: 'I agree' }).check();
+});`;
+
+  test('reads each test into its own flow with real actions', () => {
+    const { flows } = parseCodegen(js, 'login.spec.ts');
+    assert.deepStrictEqual(flows.map((f) => f.title), ['Instructor signs in', 'Second']);
+    assert.strictEqual(flows[0].startUrl, 'https://app.example.com/login');
+    const types = flows[0].actions.map((a) => a.type);
+    assert.deepStrictEqual(types, ['navigate', 'fill', 'fill', 'click', 'assert-visible']);
+    assert.deepStrictEqual(
+      { role: flows[0].actions[3].role, name: flows[0].actions[3].name },
+      { role: 'button', name: 'Sign in' },
+      'a chained .getByRole(...) over several lines is still read'
+    );
+    assert.strictEqual(flows[1].actions[1].checked, true);
+  });
+
+  test('a typed password is never imported', () => {
+    const { flows, warnings } = parseCodegen(js, 'x.ts');
+    const pw = flows[0].actions[2];
+    assert.strictEqual(pw.sensitive, true);
+    assert.ok(!('value' in pw));
+    assert.ok(!JSON.stringify(flows).includes('S3cr3tPassw0rd'));
+    assert.ok(warnings.some((w) => /password/i.test(w)));
+  });
+
+  test('a card number typed into any field is redacted', () => {
+    const { flows } = parseCodegen("test('p', async ({ page }) => {\n await page.goto('https://s.example.com');\n await page.getByLabel('Number').fill('4111 1111 1111 1111');\n});", 'p.ts');
+    assert.ok(!JSON.stringify(flows).includes('4111'));
+  });
+
+  test('Python scripts are read too', () => {
+    const { flows } = parseCodegen('def test_checkout_flow(page: Page) -> None:\n    page.goto("https://shop.example.com/")\n    page.get_by_role("link", name="Cart").click()\n    expect(page.get_by_text("Thank you")).to_be_visible()\n', 'test_checkout.py');
+    assert.strictEqual(flows[0].title, 'checkout flow');
+    assert.deepStrictEqual(flows[0].actions.map((a) => a.type), ['navigate', 'click', 'assert-visible']);
+    assert.strictEqual(flows[0].actions[1].name, 'Cart');
+  });
+
+  test('lines it does not understand are counted, not guessed at', () => {
+    const { warnings } = parseCodegen("test('x', async ({ page }) => {\n await page.goto('https://a.example.com');\n await page.getByText('Go').click();\n await expect(page).toHaveURL(/z/);\n});", 'x.ts');
+    assert.ok(warnings.some((w) => /1 line/.test(w)));
+  });
+
+  test('empty, oversized and non-script files are refused', () => {
+    assert.throws(() => parseCodegen(''), /empty/);
+    assert.throws(() => parseCodegen('x'.repeat(600 * 1024)), /too large/);
+    assert.throws(() => parseCodegen('console.log("hi")'), /No browser steps/);
+  });
+
+  test('the script is only read — code in it is not run', () => {
+    global.__codegenRan = false;
+    parseCodegen("test('x', async ({ page }) => {\n global.__codegenRan = true;\n await page.goto('https://a.example.com');\n await page.getByText('Go').click();\n});", 'x.ts');
+    assert.strictEqual(global.__codegenRan, false);
+  });
+});
+
+group('website check — click-through mode', () => {
+  const { buildUpdateAllUserPrompt } = require('../server/lib/prompts');
+  const base = { featureTitle: 'F', featureDescription: '', requirements: [], formattedScenarios: 'Scenario 1', review: 'check', url: 'https://dev.example.com' };
+
+  test('by default the check is read-only and says so', () => {
+    const p = buildUpdateAllUserPrompt(base);
+    assert.match(p, /read-only/);
+    assert.ok(!/You MAY click/.test(p));
+  });
+
+  test('with clicking allowed, the prompt names what must never be clicked', () => {
+    const p = buildUpdateAllUserPrompt({ ...base, allowClicks: true });
+    assert.match(p, /You MAY click/);
+    for (const word of ['Delete', 'Save', 'Submit', 'Pay', 'Sign out']) assert.ok(p.includes(word), `${word} should be forbidden`);
+    assert.match(p, /must not type into any field/);
+  });
+
+  test('clicking is only offered together with a website', () => {
+    assert.ok(!/You MAY click/.test(buildUpdateAllUserPrompt({ ...base, url: null, allowClicks: true })));
+  });
+
+  test('click-through tools can click and go back, but cannot type or fill forms', () => {
+    const src = require('fs').readFileSync(require('path').join(__dirname, '../server/lib/claudeCli.js'), 'utf8');
+    const block = /const CLICK_THROUGH_BROWSER_TOOLS = \[([\s\S]*?)\];/.exec(src)[1];
+    assert.match(block, /browser_click/);
+    assert.match(block, /browser_navigate_back/);
+    assert.ok(!/browser_type|fill_form|select_option|evaluate|run_code/.test(block));
+  });
+});
+
+group('data location — kept outside the install folder', () => {
+  const { execFileSync } = require('child_process');
+  const os = require('os');
+  const fs = require('fs');
+  const path = require('path');
+  const root = path.join(__dirname, '..');
+
+  const inChild = (env, code) => execFileSync(process.execPath, ['-e', code], { cwd: root, env: { ...process.env, ...env }, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim();
+
+  test('without an override, data sits beside the code as before', () => {
+    const out = inChild({ BDD_DATA_DIR: '' }, "const p=require('./server/lib/paths');console.log(p.DATA_DIR+'|'+p.PROFILE_DIR)");
+    assert.strictEqual(out, `${path.join(root, 'data')}|${path.join(root, '.browser-profile')}`);
+  });
+
+  test('with BDD_DATA_DIR, runs, history, audit log and sign-in all move there', () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'bddtest-'));
+    try {
+      const out = inChild({ BDD_DATA_DIR: dir }, `
+        const store=require('./server/lib/store'); const versions=require('./server/lib/versions'); const audit=require('./server/lib/audit'); const sess=require('./server/lib/session');
+        const run={id:'abc-123',featureTitle:'T',scenarios:[],requirements:[]};
+        store.saveRun(run); versions.snapshot(run,'x'); audit.record('t',{runId:'abc-123'});
+        console.log(JSON.stringify({runs:require('fs').existsSync(${JSON.stringify(path.join(dir, 'runs', 'abc-123.json'))}), ver:require('fs').existsSync(${JSON.stringify(path.join(dir, 'versions', 'abc-123'))}), profile:sess.PROFILE_DIR}));
+      `);
+      const info = JSON.parse(out);
+      assert.strictEqual(info.runs, true);
+      assert.strictEqual(info.ver, true);
+      assert.strictEqual(info.profile, path.join(dir, 'browser-profile'));
+      assert.ok(!fs.existsSync(path.join(root, 'data', 'runs', 'abc-123.json')), 'nothing was written into the project folder');
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test('deleting a run removes its file and its whole history; restoring puts back an earlier state', () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'bddtest-'));
+    try {
+      const out = inChild({ BDD_DATA_DIR: dir }, `
+        const fs=require('fs'); const store=require('./server/lib/store'); const versions=require('./server/lib/versions');
+        const run={id:'r-1',featureTitle:'Old',scenarios:[{id:'s',title:'one',steps:[]}],requirements:[]};
+        store.saveRun(run); const vid=versions.snapshot(run,'before');
+        const v=versions.load('r-1',vid);
+        const ok1=v.featureTitle==='Old' && v.scenarios[0].title==='one';
+        const had=fs.existsSync(${JSON.stringify(path.join(dir, 'versions', 'r-1'))});
+        const del=store.deleteRun('r-1'); versions.removeAll('r-1');
+        console.log(JSON.stringify({ok1,had,del,again:store.deleteRun('r-1'),gone:!fs.existsSync(${JSON.stringify(path.join(dir, 'runs', 'r-1.json'))}),histGone:!fs.existsSync(${JSON.stringify(path.join(dir, 'versions', 'r-1'))})}));
+      `);
+      assert.deepStrictEqual(JSON.parse(out), { ok1: true, had: true, del: true, again: false, gone: true, histGone: true });
+      assert.throws(() => inChild({ BDD_DATA_DIR: dir }, "require('./server/lib/store').deleteRun('../../etc')"), /Invalid run id/);
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});
+
 async function fixPoolTests() {
   console.log('\nautofix — worker pool');
   const { runPool } = require('../server/lib/autofix');
@@ -1296,7 +1495,57 @@ async function fixPoolTests() {
   });
 }
 
-excelImportTests().then(fixPoolTests).then(() => {
+async function pdfTests() {
+  console.log('\npdf — printable test-case document');
+  const { buildReportHtml, renderPdf } = require('../server/lib/pdf');
+  const run = {
+    featureTitle: 'Course player <b>',
+    featureDescription: 'Slides & navigation',
+    sourceUrl: 'https://dev.example.com',
+    requirements: [],
+    scenarios: [
+      scenario('a', 'Verify <script>alert(1)</script> is shown as text', [step('1', 'Given', 'the Instructor is on slide 3'), step('2', 'Then', 'slide 2 is shown')],
+        { testId: 'TC-07', description: 'The Instructor is signed in & has started a course' }),
+      scenario('b', 'Outline case', [step('3', 'Given', 'the <role> signs in'), step('4', 'Then', 'the portal opens')],
+        { isOutline: true, examples: [['role'], ['Instructor'], ['Student']] }),
+      scenario('c', 'Unticked case should not appear', [step('5', 'Given', 'x'), step('6', 'Then', 'y')], { included: false }),
+      scenario('d', 'Has an unticked step', [step('7', 'Given', 'visible step'), step('8', 'When', 'hidden step', false), step('9', 'Then', 'z')]),
+    ],
+  };
+
+  await asyncTest('the report page escapes everything, shows only ticked cases and steps, and keeps the Test IDs', async () => {
+    const html = buildReportHtml(run);
+    assert.ok(!/<script>alert/.test(html), 'a title containing a script tag is escaped');
+    assert.ok(!/Course player <b>/.test(html));
+    assert.match(html, /TC-07/);
+    assert.match(html, /Precondition<\/b> The Instructor is signed in &amp; has started a course/);
+    assert.ok(!/Unticked case should not appear/.test(html));
+    assert.ok(!/hidden step/.test(html));
+    assert.match(html, /Examples<\/b>/);
+    assert.match(html, /-002/, 'a case without an imported ID is numbered by position, like the Excel');
+  });
+
+  await asyncTest('a real PDF comes out, with the titles, preconditions and steps in it', async () => {
+    let pdf;
+    try {
+      pdf = await renderPdf(run);
+    } catch (err) {
+      if (/Could not open a browser/.test(err.message)) { console.log('      (skipped: no Chrome or Edge on this machine)'); return; }
+      throw err;
+    }
+    assert.strictEqual(Buffer.from(pdf).subarray(0, 5).toString(), '%PDF-');
+    const { PDFParse } = require('pdf-parse');
+    const parser = new PDFParse({ data: Buffer.from(pdf) });
+    const text = (await parser.getText({ pageJoiner: '\n' })).text;
+    await parser.destroy?.();
+    assert.match(text, /TC-07/);
+    assert.match(text, /The Instructor is signed in & has started a course/);
+    assert.match(text, /the Instructor is on slide 3/);
+    assert.ok(!/Unticked case should not appear/.test(text));
+  });
+}
+
+excelImportTests().then(fixPoolTests).then(pdfTests).then(() => {
   console.log(`\n${'='.repeat(52)}`);
   console.log(`${passed} passed, ${failed} failed`);
   if (failed) {
